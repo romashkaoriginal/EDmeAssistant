@@ -1,6 +1,11 @@
 const OpenAI = require("openai");
 const { z } = require("zod");
 
+const MODEL_PRICING_USD_PER_MILLION_TOKENS = {
+  "qwen/qwen3-32b": { input: 0.08, output: 0.28 },
+  "google/gemini-2.5-flash": { input: 0.30, output: 2.50 },
+};
+
 const stringArray = z.array(z.string());
 const analysisSchema = z.object({
   lessonTopic: z.string().min(1),
@@ -64,6 +69,17 @@ class LessonAnalyzer {
 
   isConfigured() { return Boolean(this.client); }
 
+  getMetadata({ usage, rawResponse = null, durationMs = null } = {}) {
+    const inputTokens = usage?.prompt_tokens ?? usage?.input_tokens ?? null;
+    const outputTokens = usage?.completion_tokens ?? usage?.output_tokens ?? null;
+    const totalTokens = usage?.total_tokens ?? (inputTokens !== null && outputTokens !== null ? inputTokens + outputTokens : null);
+    const pricing = MODEL_PRICING_USD_PER_MILLION_TOKENS[this.model];
+    const estimatedCostUsd = pricing && inputTokens !== null && outputTokens !== null
+      ? ((inputTokens * pricing.input) + (outputTokens * pricing.output)) / 1_000_000
+      : null;
+    return { provider: this.provider, model: this.model, inputTokens, outputTokens, totalTokens, estimatedCostUsd, durationMs, rawResponse };
+  }
+
   async analyze({ transcript, student }) {
     if (!this.client) {
       const error = new Error("AI provider is not configured");
@@ -80,22 +96,38 @@ class LessonAnalyzer {
       transcript.text,
     ].join("\n");
 
-    const output = this.provider === "openrouter"
-      ? (await this.client.chat.completions.create({
-        model: this.model,
-        messages: [{ role: "system", content: instructions }, { role: "user", content: input }],
-        response_format: { type: "json_schema", json_schema: analysisJsonSchema },
-      })).choices[0]?.message?.content
-      : (await this.client.responses.create({
-        model: this.model,
-        store: false,
-        instructions,
-        input,
-        text: { format: { type: "json_schema", ...analysisJsonSchema } },
-      })).output_text;
-
-    const result = parseStructuredOutput(output);
-    return { ...result, lessonDate: result.lessonDate || transcript.lessonDate };
+    const startedAt = Date.now();
+    let output = null;
+    let usage = null;
+    try {
+      if (this.provider === "openrouter") {
+        const response = await this.client.chat.completions.create({
+          model: this.model,
+          messages: [{ role: "system", content: instructions }, { role: "user", content: input }],
+          response_format: { type: "json_schema", json_schema: analysisJsonSchema },
+        });
+        output = response.choices[0]?.message?.content;
+        usage = response.usage;
+      } else {
+        const response = await this.client.responses.create({
+          model: this.model,
+          store: false,
+          instructions,
+          input,
+          text: { format: { type: "json_schema", ...analysisJsonSchema } },
+        });
+        output = response.output_text;
+        usage = response.usage;
+      }
+      const result = parseStructuredOutput(output);
+      return {
+        analysis: { ...result, lessonDate: result.lessonDate || transcript.lessonDate },
+        metadata: this.getMetadata({ usage, rawResponse: output, durationMs: Date.now() - startedAt }),
+      };
+    } catch (error) {
+      error.aiMetadata = this.getMetadata({ usage, rawResponse: output, durationMs: Date.now() - startedAt });
+      throw error;
+    }
   }
 }
 

@@ -73,6 +73,19 @@ class PostgresDatabase {
     return this.getDraftByTranscript(transcriptId, tutorId);
   }
 
+  async createAiAnalysisLog({ transcriptId, studentId, tutorId, provider, model, status, inputTokens = null, outputTokens = null, totalTokens = null, estimatedCostUsd = null, durationMs = null, rawResponse = null, errorMessage = null }) {
+    const result = await this.pool.query(`INSERT INTO ai_analysis_logs (
+      transcript_id, student_id, tutor_id, provider, model, status, input_tokens, output_tokens,
+      total_tokens, estimated_cost_usd, duration_ms, raw_response, error_message
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    RETURNING id, status, provider, model, input_tokens AS "inputTokens", output_tokens AS "outputTokens",
+      total_tokens AS "totalTokens", estimated_cost_usd AS "estimatedCostUsd", duration_ms AS "durationMs", created_at AS "createdAt"`, [
+      transcriptId, studentId, tutorId, provider, model, status, inputTokens, outputTokens,
+      totalTokens, estimatedCostUsd, durationMs, rawResponse, errorMessage,
+    ]);
+    return result.rows[0];
+  }
+
   async updateDraft(id, tutorId, changes) {
     const draft = await this.getDraft(id, tutorId);
     if (!draft || draft.status !== "draft") return null;

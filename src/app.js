@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const { z } = require("zod");
+const { runLessonAnalysis } = require("./analysis-runner");
 
 const idSchema = z.coerce.number().int().positive();
 const tutorIdSchema = z.coerce.number().int().positive();
@@ -137,8 +138,8 @@ function createApp({ database, analyzer, mtsLink, telegramBot, telegramWebhookSe
       const transcript = await database.getTranscript(transcriptId, tutorId);
       if (!transcript) return res.status(404).json({ error: "Transcript not found" });
       const student = await database.getStudent(transcript.studentId, tutorId);
-      const analysis = await analyzer.analyze({ transcript, student });
-      return res.status(201).json({ draft: await database.saveAnalysis(transcriptId, tutorId, analysis) });
+      const draft = await runLessonAnalysis({ analyzer, database, transcript, student, tutorId });
+      return res.status(201).json({ draft });
     } catch (error) { return next(error); }
   });
 

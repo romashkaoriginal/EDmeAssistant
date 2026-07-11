@@ -1,4 +1,5 @@
 const TelegramBot = require("node-telegram-bot-api").default;
+const { runLessonAnalysis } = require("./analysis-runner");
 
 const sessions = new Map();
 
@@ -41,8 +42,7 @@ function createBot({ token, database, analyzer }) {
         const transcript = await database.getTranscript(id, tutor.id);
         if (!transcript) return bot.sendMessage(chatId, "Расшифровка не найдена.");
         const student = await database.getStudent(transcript.studentId, tutor.id);
-        const analysis = await analyzer.analyze({ transcript, student });
-        const draft = await database.saveAnalysis(transcript.id, tutor.id, analysis);
+        const draft = await runLessonAnalysis({ analyzer, database, transcript, student, tutorId: tutor.id });
         const gaps = draft.changes.gaps?.map((item) => `- ${item}`).join("\n") || "Не выявлены";
         const recommendations = draft.changes.recommendations?.map((item) => `- ${item}`).join("\n") || "Нет";
         return bot.sendMessage(chatId, `<b>Черновик обновления</b>\nТема: ${draft.changes.lessonTopic}\n\nПробелы:\n${gaps}\n\nРекомендации:\n${recommendations}`, {

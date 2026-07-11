@@ -25,6 +25,8 @@ Set these secrets in Render, never in Git:
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_WEBHOOK_SECRET`
 - `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` for AI analysis.
+
+Each AI attempt is stored in `ai_analysis_logs`: provider, model, token usage, estimated cost, response duration, raw response, and error message. The log is linked to its transcript and is created for both successful and failed analyses.
 - `MTS_LINK_API_TOKEN`
 - `MTS_LINK_WEBHOOK_SECRET`
 

@@ -52,3 +52,20 @@ test("OpenRouter receives a strict JSON Schema request", async () => {
   assert.equal(request.response_format.json_schema.strict, true);
   assert.equal(request.response_format.json_schema.schema.additionalProperties, false);
 });
+
+test("analysis metadata contains token use and Qwen cost", () => {
+  const analyzer = new LessonAnalyzer({ apiKey: "test-key", provider: "openrouter", model: "qwen/qwen3-32b" });
+  assert.deepEqual(analyzer.getMetadata({
+    usage: { prompt_tokens: 1_000_000, completion_tokens: 1_000_000, total_tokens: 2_000_000 },
+    durationMs: 100,
+  }), {
+    provider: "openrouter",
+    model: "qwen/qwen3-32b",
+    inputTokens: 1_000_000,
+    outputTokens: 1_000_000,
+    totalTokens: 2_000_000,
+    estimatedCostUsd: 0.36,
+    durationMs: 100,
+    rawResponse: null,
+  });
+});
