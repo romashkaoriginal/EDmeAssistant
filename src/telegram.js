@@ -10,7 +10,7 @@ function studentText(student, card) {
 function createBot({ token, accessCode, database, analyzer }) {
   if (!token) return null;
 
-  const bot = new TelegramBot(token, { polling: true });
+  const bot = new TelegramBot(token, { polling: false });
   const menu = (chatId) => bot.sendMessage(chatId, "Главное меню", {
     reply_markup: { inline_keyboard: [[{ text: "Мои ученики", callback_data: "students" }]] },
   });

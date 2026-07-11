@@ -24,6 +24,7 @@ Set these secrets in Render, never in Git:
 - `DATABASE_URL` - Supabase Session Pooler connection string.
 - `TELEGRAM_BOT_TOKEN`
 - `TUTOR_ACCESS_CODE`
+- `TELEGRAM_WEBHOOK_SECRET`
 - `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` for AI analysis.
 - `MTS_LINK_API_TOKEN`
 - `MTS_LINK_WEBHOOK_SECRET`

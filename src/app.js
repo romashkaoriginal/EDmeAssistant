@@ -38,10 +38,20 @@ function parseOrThrow(schema, value) {
   throw error;
 }
 
-function createApp({ database, analyzer, mtsLink }) {
+function createApp({ database, analyzer, mtsLink, telegramBot, telegramWebhookSecret }) {
   const app = express();
   app.use(cors());
   app.use(express.json({ limit: "100kb" }));
+
+  if (telegramBot) {
+    app.post("/webhooks/telegram", (req, res) => {
+      if (telegramWebhookSecret && req.get("x-telegram-bot-api-secret-token") !== telegramWebhookSecret) {
+        return res.status(401).json({ error: "Invalid Telegram webhook secret" });
+      }
+      res.sendStatus(200);
+      setImmediate(() => Promise.resolve(telegramBot.processUpdate(req.body)).catch((error) => console.error("Telegram update failed", error)));
+    });
+  }
 
   app.get("/", (_req, res) => res.json({ message: "EDmeAssistant backend is running", health: "/health" }));
   app.get("/health", (_req, res) => res.json({ ok: true, service: "EDmeAssistant backend", aiConfigured: analyzer.isConfigured(), timestamp: new Date().toISOString() }));
