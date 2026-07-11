@@ -20,13 +20,28 @@ class MoyKlassService {
 
   isConfigured() { return Boolean(this.apiKey); }
 
+  async request(url, options) {
+    let lastError;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const response = await this.fetch(url, { ...options, signal: AbortSignal.timeout(20_000) });
+        if (response.ok || response.status < 500) return response;
+        lastError = new Error(`Moy Klass request failed with HTTP ${response.status}`);
+      } catch (error) {
+        lastError = error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+    }
+    throw lastError;
+  }
+
   async getAccessToken() {
     if (!this.apiKey) {
       const error = new Error("MOYKLASS_API_KEY is not configured");
       error.code = "MOYKLASS_NOT_CONFIGURED";
       throw error;
     }
-    const response = await this.fetch(`${API_URL}/auth/getToken`, {
+    const response = await this.request(`${API_URL}/auth/getToken`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ apiKey: this.apiKey }),
@@ -42,7 +57,7 @@ class MoyKlassService {
     const limit = 100;
     for (let offset = 0; ; offset += limit) {
       const query = new URLSearchParams({ ...params, limit: String(limit), offset: String(offset) });
-      const response = await this.fetch(`${API_URL}${path}?${query}`, { headers: { "x-access-token": token } });
+      const response = await this.request(`${API_URL}${path}?${query}`, { headers: { "x-access-token": token } });
       if (!response.ok) throw new Error(`Moy Klass ${path} failed with HTTP ${response.status}`);
       const page = listFromResponse(await response.json());
       items.push(...page);

@@ -22,10 +22,6 @@ async function start() {
     provider: isOpenRouter ? "openrouter" : "openai",
   });
   const moyKlass = new MoyKlassService({ apiKey: process.env.MOYKLASS_API_KEY });
-  if (moyKlass.isConfigured()) {
-    try { console.log("Moy Klass sync", await moyKlass.sync(database)); }
-    catch (error) { console.error("Moy Klass sync failed", error); }
-  }
   const mtsLink = new MtsLinkService({
     database,
     apiToken: process.env.MTS_LINK_API_TOKEN,
@@ -36,6 +32,12 @@ async function start() {
   const app = createApp({ database, analyzer, mtsLink, moyKlass, telegramBot, telegramWebhookSecret, moyKlassSyncSecret: process.env.MOYKLASS_SYNC_SECRET });
   app.listen(port, "0.0.0.0", () => {
     console.log(`EDmeAssistant backend running on port ${port}`);
+    if (moyKlass.isConfigured()) {
+      // External CRM availability must not delay the Render health check.
+      setImmediate(() => moyKlass.sync(database)
+        .then((result) => console.log("Moy Klass sync", result))
+        .catch((error) => console.error("Moy Klass sync failed", error)));
+    }
     const baseUrl = process.env.TELEGRAM_WEBHOOK_URL || process.env.RENDER_EXTERNAL_URL;
     if (telegramBot && baseUrl) {
       telegramBot.setWebhook(`${baseUrl.replace(/\/$/, "")}/webhooks/telegram`, { secret_token: telegramWebhookSecret })
