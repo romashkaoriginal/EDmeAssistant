@@ -1,0 +1,27 @@
+services:
+  - type: web
+    runtime: node
+    name: edme-assistant-api
+    plan: starter
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TUTOR_ACCESS_CODE
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_MODEL
+        sync: false
+      - key: MTS_LINK_API_TOKEN
+        sync: false
+      - key: MTS_LINK_WEBHOOK_SECRET
+        sync: false
+      - key: MTS_LINK_WEBHOOK_SECRET_HEADER
+        value: x-webhook-secret
