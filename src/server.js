@@ -4,6 +4,7 @@ const { LessonAnalyzer } = require("./analyzer");
 const { createApp } = require("./app");
 const { createBot } = require("./telegram");
 const { MtsLinkService } = require("./mts-link");
+const { MoyKlassService } = require("./moy-klass");
 
 dotenv.config();
 
@@ -20,6 +21,11 @@ async function start() {
     model: process.env.OPENROUTER_MODEL || process.env.OPENAI_MODEL,
     provider: isOpenRouter ? "openrouter" : "openai",
   });
+  const moyKlass = new MoyKlassService({ apiKey: process.env.MOYKLASS_API_KEY });
+  if (moyKlass.isConfigured()) {
+    try { console.log("Moy Klass sync", await moyKlass.sync(database)); }
+    catch (error) { console.error("Moy Klass sync failed", error); }
+  }
   const mtsLink = new MtsLinkService({
     database,
     apiToken: process.env.MTS_LINK_API_TOKEN,
@@ -27,7 +33,7 @@ async function start() {
   });
   const telegramBot = createBot({ token: process.env.TELEGRAM_BOT_TOKEN, database, analyzer });
   const telegramWebhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
-  const app = createApp({ database, analyzer, mtsLink, telegramBot, telegramWebhookSecret });
+  const app = createApp({ database, analyzer, mtsLink, moyKlass, telegramBot, telegramWebhookSecret, moyKlassSyncSecret: process.env.MOYKLASS_SYNC_SECRET });
   app.listen(port, "0.0.0.0", () => {
     console.log(`EDmeAssistant backend running on port ${port}`);
     const baseUrl = process.env.TELEGRAM_WEBHOOK_URL || process.env.RENDER_EXTERNAL_URL;

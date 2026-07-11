@@ -32,8 +32,8 @@ class PostgresDatabase {
     const phone = normalized.replace(/\D/g, "");
     return phone ? this.one("SELECT * FROM tutors WHERE phone = $1 AND is_active = TRUE", [phone]) : null;
   }
-  async listStudents(tutorId) { return this.rows("SELECT * FROM students WHERE tutor_id = $1 AND status = 'active' ORDER BY full_name", [tutorId]); }
-  async getStudent(studentId, tutorId) { return this.one("SELECT * FROM students WHERE id = $1 AND tutor_id = $2", [studentId, tutorId]); }
+  async listStudents(tutorId) { return this.rows(`SELECT s.* FROM students s JOIN tutor_students ts ON ts.student_id = s.id WHERE ts.tutor_id = $1 AND s.status = 'active' ORDER BY s.full_name`, [tutorId]); }
+  async getStudent(studentId, tutorId) { return this.one(`SELECT s.* FROM students s JOIN tutor_students ts ON ts.student_id = s.id WHERE s.id = $1 AND ts.tutor_id = $2`, [studentId, tutorId]); }
   async getCard(studentId) { return this.one(`SELECT student_id AS "studentId", current_level AS "currentLevel", strengths, weaknesses, gaps, recommendations, learning_goal AS "learningGoal", learning_pace AS "learningPace", features, next_lesson_plan AS "nextLessonPlan", updated_at AS "updatedAt" FROM student_cards WHERE student_id = $1`, [studentId]); }
   async listHistory(studentId) { return this.rows(`SELECT id, source, changes, created_at AS "createdAt" FROM card_history WHERE student_id = $1 ORDER BY id DESC`, [studentId]); }
   async getTranscript(id, tutorId) { return this.one(`SELECT id, student_id AS "studentId", tutor_id AS "tutorId", lesson_date AS "lessonDate", text, status, analysis_result AS "analysisResult", created_at AS "createdAt" FROM transcripts WHERE id = $1 AND tutor_id = $2`, [id, tutorId]); }
@@ -49,6 +49,32 @@ class PostgresDatabase {
     const result = await this.pool.query(`UPDATE tutors SET telegram_id = $1 WHERE id = $2
       AND (telegram_id IS NULL OR telegram_id = $1) RETURNING *`, [String(telegramId), tutorId]);
     return result.rows[0] || null;
+  }
+
+  async upsertMoyKlassTutor(manager) {
+    const result = await this.pool.query(`INSERT INTO tutors (full_name, email, phone, my_klass_id, is_active)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (my_klass_id) WHERE my_klass_id IS NOT NULL DO UPDATE SET
+        full_name = EXCLUDED.full_name, email = EXCLUDED.email, phone = EXCLUDED.phone,
+        is_active = EXCLUDED.is_active
+      RETURNING *`, [manager.name, manager.email || null, manager.phone ? String(manager.phone).replace(/\D/g, "") : null, String(manager.id), manager.isWork !== false && manager.blocked !== true]);
+    return result.rows[0];
+  }
+
+  async upsertMoyKlassStudent(user, { subject, grade, tutorId }) {
+    const result = await this.pool.query(`INSERT INTO students (full_name, subject, grade, my_class_id, my_klass_id, tutor_id, status)
+      VALUES ($1, $2, $3, $4, $5, $6, 'active')
+      ON CONFLICT (my_klass_id) WHERE my_klass_id IS NOT NULL DO UPDATE SET
+        full_name = EXCLUDED.full_name, subject = EXCLUDED.subject, grade = EXCLUDED.grade,
+        my_class_id = EXCLUDED.my_class_id, status = 'active'
+      RETURNING *`, [user.name, subject, grade, String(user.id), String(user.id), tutorId]);
+    const student = result.rows[0];
+    await this.pool.query("INSERT INTO student_cards (student_id) VALUES ($1) ON CONFLICT (student_id) DO NOTHING", [student.id]);
+    return student;
+  }
+
+  async linkTutorStudent(tutorId, studentId) {
+    await this.pool.query("INSERT INTO tutor_students (tutor_id, student_id) VALUES ($1, $2) ON CONFLICT (tutor_id, student_id) DO UPDATE SET synced_at = NOW()", [tutorId, studentId]);
   }
 
   async updateCard(studentId, tutorId, patch, source = "manual", client = this.pool) {

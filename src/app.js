@@ -39,7 +39,7 @@ function parseOrThrow(schema, value) {
   throw error;
 }
 
-function createApp({ database, analyzer, mtsLink, telegramBot, telegramWebhookSecret }) {
+function createApp({ database, analyzer, mtsLink, moyKlass, telegramBot, telegramWebhookSecret, moyKlassSyncSecret }) {
   const app = express();
   app.use(cors());
   app.use(express.json({
@@ -59,6 +59,14 @@ function createApp({ database, analyzer, mtsLink, telegramBot, telegramWebhookSe
 
   app.get("/", (_req, res) => res.json({ message: "EDmeAssistant backend is running", health: "/health" }));
   app.get("/health", (_req, res) => res.json({ ok: true, service: "EDmeAssistant backend", aiConfigured: analyzer.isConfigured(), timestamp: new Date().toISOString() }));
+
+  app.post("/api/moy-klass/sync", async (req, res, next) => {
+    try {
+      if (!moyKlass?.isConfigured()) return res.status(503).json({ error: "Moy Klass is not configured" });
+      if (!moyKlassSyncSecret || req.get("x-moy-klass-sync-secret") !== moyKlassSyncSecret) return res.status(401).json({ error: "Invalid sync secret" });
+      return res.json({ sync: await moyKlass.sync(database) });
+    } catch (error) { return next(error); }
+  });
 
   app.get("/api/students", async (req, res, next) => {
     try { res.json({ students: await database.listStudents(parseOrThrow(tutorIdSchema, req.query.tutorId)) }); } catch (error) { next(error); }

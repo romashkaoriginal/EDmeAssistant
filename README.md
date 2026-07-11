@@ -25,6 +25,8 @@ Set these secrets in Render, never in Git:
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_WEBHOOK_SECRET`
 - `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` for AI analysis.
+- `MOYKLASS_API_KEY` for read-only synchronization of tutors, students, and group membership from "Мой Класс".
+- `MOYKLASS_SYNC_SECRET` to manually run `POST /api/moy-klass/sync` with the `x-moy-klass-sync-secret` header.
 
 Each AI attempt is stored in `ai_analysis_logs`: provider, model, token usage, estimated cost, response duration, raw response, and error message. The log is linked to its transcript and is created for both successful and failed analyses.
 - `MTS_LINK_API_TOKEN`
