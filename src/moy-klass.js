@@ -55,7 +55,14 @@ class MoyKlassService {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         const response = await this.fetch(url, { ...options, signal: AbortSignal.timeout(20_000) });
-        if (response.ok || response.status < 500) return response;
+        const payload = await response.text();
+        if (response.ok || response.status < 500) {
+          return {
+            ok: response.ok,
+            status: response.status,
+            json: async () => JSON.parse(payload || "null"),
+          };
+        }
         lastError = new Error(`Moy Klass request failed with HTTP ${response.status}`);
       } catch (error) {
         lastError = error;

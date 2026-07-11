@@ -8,7 +8,7 @@ test("Moy Klass uses the company key only to obtain a temporary access token", a
     apiKey: "company-key",
     fetchImpl: async (url, options) => {
       requests.push({ url, options });
-      return { ok: true, json: async () => ({ accessToken: "temporary-token" }) };
+      return { ok: true, status: 200, text: async () => JSON.stringify({ accessToken: "temporary-token" }) };
     },
   });
   assert.equal(await service.getAccessToken(), "temporary-token");
