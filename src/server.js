@@ -26,14 +26,14 @@ async function start() {
     webhookSecret: process.env.MTS_LINK_WEBHOOK_SECRET,
     webhookSecretHeader: process.env.MTS_LINK_WEBHOOK_SECRET_HEADER,
   });
-  const telegramBot = createBot({ token: process.env.TELEGRAM_BOT_TOKEN, accessCode: process.env.TUTOR_ACCESS_CODE, database, analyzer });
+  const telegramBot = createBot({ token: process.env.TELEGRAM_BOT_TOKEN, database, analyzer });
   const telegramWebhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
   const app = createApp({ database, analyzer, mtsLink, telegramBot, telegramWebhookSecret });
   app.listen(port, "0.0.0.0", () => {
     console.log(`EDmeAssistant backend running on port ${port}`);
     const baseUrl = process.env.TELEGRAM_WEBHOOK_URL || process.env.RENDER_EXTERNAL_URL;
     if (telegramBot && baseUrl) {
-      telegramBot.setWebHook(`${baseUrl.replace(/\/$/, "")}/webhooks/telegram`, { secret_token: telegramWebhookSecret })
+      telegramBot.setWebhook(`${baseUrl.replace(/\/$/, "")}/webhooks/telegram`, { secret_token: telegramWebhookSecret })
         .then(() => console.log("Telegram webhook configured"))
         .catch((error) => console.error("Telegram webhook configuration failed", error));
     }

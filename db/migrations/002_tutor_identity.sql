@@ -1,0 +1,2 @@
+ALTER TABLE tutors ADD COLUMN IF NOT EXISTS phone TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS tutors_phone_unique ON tutors (phone) WHERE phone IS NOT NULL;

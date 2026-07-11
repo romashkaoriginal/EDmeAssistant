@@ -13,8 +13,6 @@ services:
         sync: false
       - key: TELEGRAM_BOT_TOKEN
         sync: false
-      - key: TUTOR_ACCESS_CODE
-        sync: false
       - key: TELEGRAM_WEBHOOK_SECRET
         generateValue: true
       - key: OPENROUTER_API_KEY

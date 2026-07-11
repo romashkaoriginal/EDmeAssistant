@@ -7,7 +7,7 @@ function studentText(student, card) {
   return `<b>${student.full_name}</b>\n${student.subject}, ${student.grade} класс\nУровень: ${card.currentLevel || "не указан"}\n\n<b>Пробелы</b>\n${gaps}`;
 }
 
-function createBot({ token, accessCode, database, analyzer }) {
+function createBot({ token, database, analyzer }) {
   if (!token) return null;
 
   const bot = new TelegramBot(token, { polling: false });
@@ -17,9 +17,8 @@ function createBot({ token, accessCode, database, analyzer }) {
 
   bot.onText(/^\/start$/, async (message) => {
     if (await database.getTutorByTelegramId(message.from.id)) return menu(message.chat.id);
-    if (!accessCode) return bot.sendMessage(message.chat.id, "Бот не настроен: отсутствует TUTOR_ACCESS_CODE.");
-    sessions.set(message.from.id, { action: "access" });
-    return bot.sendMessage(message.chat.id, "Введите код доступа репетитора.");
+    sessions.set(message.from.id, { action: "identity" });
+    return bot.sendMessage(message.chat.id, "Введите email или номер телефона, указанный в Мой Класс.");
   });
 
   bot.on("callback_query", async (query) => {
@@ -93,10 +92,11 @@ function createBot({ token, accessCode, database, analyzer }) {
     const session = sessions.get(message.from.id);
     if (!session) return;
 
-    if (session.action === "access") {
-      if (message.text.trim() !== accessCode) return bot.sendMessage(message.chat.id, "Неверный код доступа.");
-      const tutor = await database.claimDemoTutor(message.from.id);
-      if (!tutor) return bot.sendMessage(message.chat.id, "Демо-профиль уже привязан. Для следующего репетитора нужен импорт из Мой Класс.");
+    if (session.action === "identity") {
+      const tutor = await database.getTutorByIdentity(message.text);
+      if (!tutor) return bot.sendMessage(message.chat.id, "Профиль не найден. Проверьте email или номер телефона в Мой Класс и обратитесь к администратору.");
+      const linkedTutor = await database.bindTutorTelegramId(tutor.id, message.from.id);
+      if (!linkedTutor) return bot.sendMessage(message.chat.id, "Этот Telegram уже привязан к другому профилю. Обратитесь к администратору.");
       sessions.delete(message.from.id);
       return menu(message.chat.id);
     }

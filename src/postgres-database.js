@@ -8,8 +8,10 @@ class PostgresDatabase {
   }
 
   async initialize() {
-    const migration = fs.readFileSync(path.join(__dirname, "..", "db", "migrations", "001_initial.sql"), "utf8");
-    await this.pool.query(migration);
+    const migrationsDir = path.join(__dirname, "..", "db", "migrations");
+    for (const filename of fs.readdirSync(migrationsDir).filter((name) => name.endsWith(".sql")).sort()) {
+      await this.pool.query(fs.readFileSync(path.join(migrationsDir, filename), "utf8"));
+    }
     const { rows } = await this.pool.query("SELECT COUNT(*)::int AS count FROM tutors");
     if (rows[0].count === 0) await this.seedDemoData();
   }
@@ -24,6 +26,12 @@ class PostgresDatabase {
   }
 
   async getTutorByTelegramId(telegramId) { return this.one("SELECT * FROM tutors WHERE telegram_id = $1 AND is_active = TRUE", [String(telegramId)]); }
+  async getTutorByIdentity(identity) {
+    const normalized = String(identity).trim();
+    if (normalized.includes("@")) return this.one("SELECT * FROM tutors WHERE LOWER(email) = LOWER($1) AND is_active = TRUE", [normalized]);
+    const phone = normalized.replace(/\D/g, "");
+    return phone ? this.one("SELECT * FROM tutors WHERE phone = $1 AND is_active = TRUE", [phone]) : null;
+  }
   async listStudents(tutorId) { return this.rows("SELECT * FROM students WHERE tutor_id = $1 AND status = 'active' ORDER BY full_name", [tutorId]); }
   async getStudent(studentId, tutorId) { return this.one("SELECT * FROM students WHERE id = $1 AND tutor_id = $2", [studentId, tutorId]); }
   async getCard(studentId) { return this.one(`SELECT student_id AS "studentId", current_level AS "currentLevel", strengths, weaknesses, gaps, recommendations, learning_goal AS "learningGoal", learning_pace AS "learningPace", features, next_lesson_plan AS "nextLessonPlan", updated_at AS "updatedAt" FROM student_cards WHERE student_id = $1`, [studentId]); }
@@ -35,17 +43,12 @@ class PostgresDatabase {
   async getMtsSession(eventSessionId) { return this.one(`SELECT event_session_id AS "eventSessionId", my_klass_lesson_id AS "myKlassLessonId", student_id AS "studentId", tutor_id AS "tutorId", synced_at AS "syncedAt" FROM mts_link_sessions WHERE event_session_id = $1`, [String(eventSessionId)]); }
   async getMtsWebhook(transcriptId) { return this.one(`SELECT transcript_id AS "transcriptId", event_session_id AS "eventSessionId", local_transcript_id AS "localTranscriptId", status, raw_payload AS "rawPayload", error_message AS "errorMessage", received_at AS "receivedAt", updated_at AS "updatedAt" FROM mts_link_webhooks WHERE transcript_id = $1`, [String(transcriptId)]); }
 
-  async claimDemoTutor(telegramId) {
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
-      const existing = await client.query("SELECT * FROM tutors WHERE telegram_id = $1 AND is_active = TRUE", [String(telegramId)]);
-      if (existing.rows[0]) { await client.query("COMMIT"); return existing.rows[0]; }
-      const demo = await client.query("SELECT id FROM tutors WHERE id = 1 AND telegram_id IS NULL FOR UPDATE");
-      if (!demo.rows[0]) { await client.query("COMMIT"); return null; }
-      const result = await client.query("UPDATE tutors SET telegram_id = $1 WHERE id = $2 RETURNING *", [String(telegramId), demo.rows[0].id]);
-      await client.query("COMMIT"); return result.rows[0];
-    } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
+  async bindTutorTelegramId(tutorId, telegramId) {
+    const existing = await this.getTutorByTelegramId(telegramId);
+    if (existing && Number(existing.id) !== Number(tutorId)) return null;
+    const result = await this.pool.query(`UPDATE tutors SET telegram_id = $1 WHERE id = $2
+      AND (telegram_id IS NULL OR telegram_id = $1) RETURNING *`, [String(telegramId), tutorId]);
+    return result.rows[0] || null;
   }
 
   async updateCard(studentId, tutorId, patch, source = "manual", client = this.pool) {
