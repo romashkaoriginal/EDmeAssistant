@@ -24,7 +24,6 @@ async function start() {
     database,
     apiToken: process.env.MTS_LINK_API_TOKEN,
     webhookSecret: process.env.MTS_LINK_WEBHOOK_SECRET,
-    webhookSecretHeader: process.env.MTS_LINK_WEBHOOK_SECRET_HEADER,
   });
   const telegramBot = createBot({ token: process.env.TELEGRAM_BOT_TOKEN, database, analyzer });
   const telegramWebhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;

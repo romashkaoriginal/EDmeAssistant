@@ -23,5 +23,3 @@ services:
         sync: false
       - key: MTS_LINK_WEBHOOK_SECRET
         sync: false
-      - key: MTS_LINK_WEBHOOK_SECRET_HEADER
-        value: x-webhook-secret

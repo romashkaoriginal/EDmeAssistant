@@ -42,7 +42,10 @@ function parseOrThrow(schema, value) {
 function createApp({ database, analyzer, mtsLink, telegramBot, telegramWebhookSecret }) {
   const app = express();
   app.use(cors());
-  app.use(express.json({ limit: "100kb" }));
+  app.use(express.json({
+    limit: "100kb",
+    verify: (req, _res, buffer) => { req.rawBody = Buffer.from(buffer); },
+  }));
 
   if (telegramBot) {
     app.post("/webhooks/telegram", (req, res) => {

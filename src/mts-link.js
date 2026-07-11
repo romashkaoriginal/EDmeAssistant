@@ -1,9 +1,10 @@
+const crypto = require("node:crypto");
+
 class MtsLinkService {
-  constructor({ database, apiToken, webhookSecret, webhookSecretHeader = "x-webhook-secret", fetchImpl = fetch }) {
+  constructor({ database, apiToken, webhookSecret, fetchImpl = fetch }) {
     this.database = database;
     this.apiToken = apiToken;
     this.webhookSecret = webhookSecret;
-    this.webhookSecretHeader = webhookSecretHeader.toLowerCase();
     this.fetch = fetchImpl;
   }
 
@@ -12,7 +13,12 @@ class MtsLinkService {
   }
 
   verifyWebhook(request) {
-    return Boolean(this.webhookSecret) && request.get(this.webhookSecretHeader) === this.webhookSecret;
+    if (!this.webhookSecret || !request.rawBody) return false;
+    const header = request.get("x-webhook-signature") || "";
+    const signature = header.replace(/^sha256=/i, "");
+    const expected = crypto.createHmac("sha256", this.webhookSecret).update(request.rawBody).digest("hex");
+    if (!/^[0-9a-f]{64}$/i.test(signature) || signature.length !== expected.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(signature, "hex"), Buffer.from(expected, "hex"));
   }
 
   async fetchTranscript(transcriptId) {

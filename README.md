@@ -36,4 +36,6 @@ Set the MTS Link webhook URL to:
 https://<render-service>.onrender.com/webhooks/mts-link
 ```
 
+Create it for the `transcription.ready` event and use the same `signatureSecret` as `MTS_LINK_WEBHOOK_SECRET`. Incoming requests are verified with the official `X-Webhook-Signature` HMAC-SHA256 signature.
+
 The application stores a ready transcript as `new`; it never applies an AI result to a student card without tutor confirmation.
