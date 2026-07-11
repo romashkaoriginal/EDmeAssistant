@@ -1,3 +1,5 @@
+const https = require("node:https");
+
 const API_URL = "https://api.moyklass.com/v1/company";
 
 function listFromResponse(body) {
@@ -10,6 +12,34 @@ function listFromResponse(body) {
 function gradeFromName(name) {
   const match = String(name || "").match(/\b(1[01]|[1-9])\s*(?:класс|кл\.?)/i);
   return match ? Number(match[1]) : null;
+}
+
+function requestViaIpv4(url, options) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const body = options.body || "";
+    const request = https.request({
+      hostname: target.hostname,
+      path: `${target.pathname}${target.search}`,
+      method: options.method || "GET",
+      family: 4,
+      timeout: 20_000,
+      headers: { ...options.headers, ...(body && { "Content-Length": Buffer.byteLength(body) }) },
+    }, (response) => {
+      let payload = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => { payload += chunk; });
+      response.on("end", () => resolve({
+        ok: response.statusCode >= 200 && response.statusCode < 300,
+        status: response.statusCode,
+        json: async () => JSON.parse(payload || "null"),
+      }));
+    });
+    request.once("timeout", () => request.destroy(new Error("Moy Klass IPv4 request timed out")));
+    request.once("error", reject);
+    if (body) request.write(body);
+    request.end();
+  });
 }
 
 class MoyKlassService {
@@ -32,7 +62,12 @@ class MoyKlassService {
       }
       await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
     }
-    throw lastError;
+    try {
+      return await requestViaIpv4(url, options);
+    } catch (ipv4Error) {
+      ipv4Error.cause = lastError;
+      throw ipv4Error;
+    }
   }
 
   async getAccessToken() {
