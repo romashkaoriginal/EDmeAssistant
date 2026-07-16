@@ -21,9 +21,9 @@ services:
         sync: false
       - key: MOYKLASS_API_KEY
         sync: false
-      - key: MOYKLASS_SYNC_SECRET
-        generateValue: true
       - key: MTS_LINK_API_TOKEN
         sync: false
       - key: MTS_LINK_WEBHOOK_SECRET
         sync: false
+      - key: INTERNAL_API_SECRET
+        generateValue: true

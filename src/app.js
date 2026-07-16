@@ -1,5 +1,5 @@
 const express = require("express");
-const cors = require("cors");
+const crypto = require("node:crypto");
 const { z } = require("zod");
 const { runLessonAnalysis } = require("./analysis-runner");
 
@@ -7,6 +7,7 @@ const idSchema = z.coerce.number().int().positive();
 const tutorIdSchema = z.coerce.number().int().positive();
 const cardPatchSchema = z.object({
   currentLevel: z.string().max(100).optional(),
+  topics: z.array(z.string().max(500)).optional(),
   strengths: z.array(z.string().max(500)).optional(),
   weaknesses: z.array(z.string().max(500)).optional(),
   gaps: z.array(z.string().max(500)).optional(),
@@ -39,17 +40,29 @@ function parseOrThrow(schema, value) {
   throw error;
 }
 
-function createApp({ database, analyzer, mtsLink, moyKlass, telegramBot, telegramWebhookSecret, moyKlassSyncSecret }) {
+function matchesSecret(value, expected) {
+  if (!expected || typeof value !== "string") return false;
+  const actual = Buffer.from(value);
+  const target = Buffer.from(expected);
+  return actual.length === target.length && crypto.timingSafeEqual(actual, target);
+}
+
+function createApp({ database, analyzer, mtsLink, moyKlass, telegramBot, telegramWebhookSecret, apiSecret }) {
   const app = express();
-  app.use(cors());
+  app.disable("x-powered-by");
   app.use(express.json({
     limit: "100kb",
+    strict: true,
+    type: ["application/json", "application/*+json"],
     verify: (req, _res, buffer) => { req.rawBody = Buffer.from(buffer); },
   }));
 
   if (telegramBot) {
     app.post("/webhooks/telegram", (req, res) => {
-      if (telegramWebhookSecret && req.get("x-telegram-bot-api-secret-token") !== telegramWebhookSecret) {
+      if (!telegramWebhookSecret) {
+        return res.status(503).json({ error: "Telegram webhook is not configured" });
+      }
+      if (!matchesSecret(req.get("x-telegram-bot-api-secret-token"), telegramWebhookSecret)) {
         return res.status(401).json({ error: "Invalid Telegram webhook secret" });
       }
       res.sendStatus(200);
@@ -58,13 +71,46 @@ function createApp({ database, analyzer, mtsLink, moyKlass, telegramBot, telegra
   }
 
   app.get("/", (_req, res) => res.json({ message: "EDmeAssistant backend is running", health: "/health" }));
-  app.get("/health", (_req, res) => res.json({ ok: true, service: "EDmeAssistant backend", aiConfigured: analyzer.isConfigured(), timestamp: new Date().toISOString() }));
+  app.get("/health", async (_req, res) => {
+    try {
+      if (typeof database.ping === "function") await database.ping();
+      return res.json({ ok: true, service: "EDmeAssistant backend", db: "up", timestamp: new Date().toISOString() });
+    } catch (error) {
+      console.error("Health check failed", error);
+      return res.status(503).json({ ok: false, service: "EDmeAssistant backend", db: "down", timestamp: new Date().toISOString() });
+    }
+  });
+
+  // HTTP API is an internal integration surface. Telegram users never call it directly.
+  app.use("/api", (req, res, next) => {
+    if (!apiSecret) return res.status(503).json({ error: "Internal API is disabled" });
+    if (!matchesSecret(req.get("x-api-secret"), apiSecret)) return res.status(401).json({ error: "Invalid API secret" });
+    return next();
+  });
 
   app.post("/api/moy-klass/sync", async (req, res, next) => {
     try {
       if (!moyKlass?.isConfigured()) return res.status(503).json({ error: "Moy Klass is not configured" });
-      if (!moyKlassSyncSecret || req.get("x-moy-klass-sync-secret") !== moyKlassSyncSecret) return res.status(401).json({ error: "Invalid sync secret" });
       return res.json({ sync: await moyKlass.sync(database) });
+    } catch (error) { return next(error); }
+  });
+
+  app.post("/api/materials/sync", async (req, res, next) => {
+    try {
+      if (!mtsLink?.isConfigured()) return res.status(503).json({ error: "MTS Link is not configured" });
+      return res.json({ sync: await mtsLink.syncMaterials(database) });
+    } catch (error) { return next(error); }
+  });
+
+  app.get("/api/materials", async (req, res, next) => {
+    try {
+      return res.json({ materials: await database.searchMaterials({ query: req.query.q, subject: req.query.subject, grade: req.query.grade ? parseOrThrow(idSchema, req.query.grade) : null }) });
+    } catch (error) { return next(error); }
+  });
+
+  app.get("/api/metrics", async (req, res, next) => {
+    try {
+      return res.json({ metrics: await database.getMetrics() });
     } catch (error) { return next(error); }
   });
 
@@ -122,6 +168,7 @@ function createApp({ database, analyzer, mtsLink, moyKlass, telegramBot, telegra
     try {
       const studentId = parseOrThrow(idSchema, req.params.studentId);
       const input = parseOrThrow(mtsSessionSchema, req.body);
+      if (!await database.getStudent(studentId, input.tutorId)) return res.status(404).json({ error: "Student not found" });
       const session = await database.linkMtsSession({ studentId, ...input });
       if (!session) return res.status(404).json({ error: "Student not found" });
       return res.status(201).json({ session });
@@ -149,6 +196,7 @@ function createApp({ database, analyzer, mtsLink, moyKlass, telegramBot, telegra
       const transcript = await database.getTranscript(transcriptId, tutorId);
       if (!transcript) return res.status(404).json({ error: "Transcript not found" });
       const student = await database.getStudent(transcript.studentId, tutorId);
+      if (!student) return res.status(404).json({ error: "Student not found" });
       const draft = await runLessonAnalysis({ analyzer, database, transcript, student, tutorId });
       return res.status(201).json({ draft });
     } catch (error) { return next(error); }

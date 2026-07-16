@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { runLessonAnalysis } = require("../src/analysis-runner");
+const { runLessonAnalysis, runProfileAnalysis, profileBatches, transcriptParts } = require("../src/analysis-runner");
 
 const transcript = { id: 10, studentId: 20 };
 const student = { id: 20 };
@@ -38,4 +38,44 @@ test("failed analysis saves error details and rethrows the original error", asyn
   assert.equal(log.status, "failed");
   assert.equal(log.errorMessage, "Provider timeout");
   assert.equal(log.durationMs, 5000);
+});
+
+test("deep profile analysis processes transcript batches chronologically and creates one draft", async () => {
+  const calls = [];
+  const analyzer = {
+    analyzeProfile: async ({ card, transcripts }) => {
+      calls.push({ card, transcriptIds: transcripts.map((item) => item.id) });
+      return {
+        profile: {
+          currentLevel: "Средний",
+          topics: transcripts.map((item) => `Тема ${item.id}`),
+          strengths: [], weaknesses: [], gaps: [], recommendations: [],
+          learningGoal: "", learningPace: "", features: "", nextLessonPlan: "",
+          missingFields: ["learningGoal"],
+        },
+        metadata: { provider: "test", model: "test" },
+      };
+    },
+  };
+  let savedDraft;
+  const database = {
+    createAiAnalysisLog: async (value) => calls.push({ log: value.status }),
+    createProfileDraft: async (value) => { savedDraft = value; return { id: 9, ...value }; },
+  };
+  const transcripts = Array.from({ length: 7 }, (_, index) => ({ id: index + 1, lessonDate: `2026-07-0${index + 1}`, text: "Короткая расшифровка" }));
+
+  const draft = await runProfileAnalysis({ analyzer, database, transcripts, student: { id: 4 }, card: {}, tutorId: 2 });
+
+  assert.equal(calls.filter((item) => item.transcriptIds).length, 2);
+  assert.deepEqual(calls.filter((item) => item.transcriptIds).map((item) => item.transcriptIds), [[1, 2, 3, 4, 5, 6], [7]]);
+  assert.equal(draft.id, 9);
+  assert.deepEqual(savedDraft.sourceTranscriptIds, [1, 2, 3, 4, 5, 6, 7]);
+  assert.deepEqual(savedDraft.missingFields, ["learningGoal"]);
+});
+
+test("deep profile batching splits a very long transcript before calling the model", () => {
+  const parts = transcriptParts([{ id: 1, text: "x".repeat(40_000) }]);
+  assert.equal(parts.length, 3);
+  assert.ok(parts.every((item) => item.text.length <= 18_000));
+  assert.ok(profileBatches([{ id: 1, text: "x".repeat(100_000) }]).length >= 3);
 });
