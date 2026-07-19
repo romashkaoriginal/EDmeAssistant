@@ -199,6 +199,16 @@ test("test validation accepts Rich Markdown emphasis in the answer key", () => {
   assert.deepEqual(testQualityIssues(cyrillicLabels), []);
 });
 
+test("test validation rejects answer options placed on one line", () => {
+  const invalid = validFractionTest()
+    .replace(String.raw`A. $\frac{7}{10}$
+B. $\frac{10}{21}$
+C. $\frac{12}{35}$
+D. $1$`, String.raw`A. $\frac{7}{10}$ B. $\frac{10}{21}$ C. $\frac{12}{35}$ D. $1$`);
+
+  assert.deepEqual(testQualityIssues(invalid), ["в вопросе 1 должны быть варианты A, B, C и D"]);
+});
+
 test("validation rejects references to missing visuals", () => {
   const invalid = validFractionTest().replace("Calculate $\\frac{2}{3} \\cdot \\frac{5}{7}$.", "На каком рисунке изображён график функции?");
   const issues = require("../src/generator").richMarkdownIssues({ text: invalid, type: "test", student, topic: "Графики" });
