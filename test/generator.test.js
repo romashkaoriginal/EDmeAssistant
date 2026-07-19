@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { ContentGenerator, GENERATION_TYPES, ADJUSTMENTS, studentVersion, ANSWERS_MARKER } = require("../src/generator");
+const { ContentGenerator, GENERATION_TYPES, ADJUSTMENTS, studentVersion, ANSWERS_MARKER, testQualityIssues } = require("../src/generator");
 
 const student = { full_name: "Иван Петров", subject: "Математика", grade: 8 };
 const card = {
@@ -29,6 +29,47 @@ function mockedGenerator(reply) {
   return { generator, requests };
 }
 
+function validFractionTest() {
+  return String.raw`# Test: fractions
+
+1. Calculate $\frac{2}{3} \cdot \frac{5}{7}$.
+A. $\frac{7}{10}$
+B. $\frac{10}{21}$
+C. $\frac{12}{35}$
+D. $1$
+
+2. Calculate $\frac{3}{4} + \frac{2}{5}$.
+A. $\frac{5}{9}$
+B. $\frac{7}{20}$
+C. $\frac{23}{20}$
+D. $\frac{31}{20}$
+
+3. Calculate $3 \div \frac{1}{3}$.
+A. $1$
+B. $3$
+C. $6$
+D. $9$
+
+4. Calculate $\frac{1}{2} + \frac{1}{4}$.
+A. $\frac{3}{4}$
+B. $\frac{2}{6}$
+C. $\frac{1}{8}$
+D. $1$
+
+5. Было $3\frac{1}{4}$ торта. Съели $1\frac{1}{2}$ торта. Сколько осталось?
+A. $1\frac{1}{2}$
+B. $1\frac{3}{4}$
+C. $1\frac{7}{12}$
+D. $2\frac{1}{4}$
+
+## ${ANSWERS_MARKER}
+1. B — $\frac{10}{21}$
+2. C — $\frac{23}{20}$
+3. D — $9$
+4. A — $\frac{3}{4}$
+5. B — $1\frac{3}{4}$`;
+}
+
 test("generator covers homework, test and tasks types", () => {
   assert.deepEqual(Object.keys(GENERATION_TYPES), ["homework", "test", "tasks"]);
   assert.deepEqual(Object.keys(ADJUSTMENTS), ["regenerate", "easier", "harder", "shorter", "more_practice", "more_questions", "fewer_questions"]);
@@ -51,7 +92,20 @@ $x^2 = 4$`;
   assert.match(systemMessage, /## Задания/);
   assert.match(systemMessage, /Telegram Rich Markdown/);
   assert.match(systemMessage, /\\frac\{числитель\}\{знаменатель\}/);
+  assert.match(systemMessage, /не ссылается на рисунки/);
+  assert.match(systemMessage, /не добавляй отчёт/);
   assert.doesNotMatch(systemMessage, /Не используй LaTeX/);
+});
+
+test("generation prompt forbids tests that depend on missing visuals", async () => {
+  const { generator, requests } = mockedGenerator(validFractionTest());
+
+  await generator.generate({ type: "test", student, card, topic: "Квадратичная функция и графики" });
+
+  const systemMessage = requests[0].messages.find((item) => item.role === "system").content;
+  assert.match(systemMessage, /на каком рисунке/);
+  assert.match(systemMessage, /Свойства графиков проверяй по заданной формуле/);
+  assert.match(systemMessage, /без отчёта о проверке и исправлениях/);
 });
 
 test("adjustment request carries the previous result", async () => {
@@ -78,14 +132,135 @@ test("generation retries once when a math response has no Rich Markdown or LaTeX
 1. $\frac{3}{4}$`;
   const { generator, requests } = mockedGenerator([
     "Тест по теме: Дроби\n\n1. Чему равна сумма 1/2 + 1/4?\n\nОтветы для репетитора:\n1. 3/4",
-    repaired,
+    validFractionTest(),
   ]);
 
   const { result } = await generator.generate({ type: "test", student, card, topic: "Дроби" });
 
-  assert.equal(result, repaired);
+  assert.equal(result, validFractionTest());
   assert.equal(requests.length, 2);
   assert.match(requests[1].messages.at(-1).content, /дроби остались вне LaTeX/);
+});
+
+test("test validation catches a key that does not match a fraction calculation", () => {
+  const invalid = validFractionTest().replace("B. $\\frac{10}{21}$", "B. $\\frac{2}{3}$");
+  assert.deepEqual(testQualityIssues(invalid), ["в вопросе 1 ключ не совпадает с результатом вычисления"]);
+});
+
+test("test validation catches an incorrect answer to a fraction word problem", () => {
+  const invalid = validFractionTest().replace("5. B — $1\\frac{3}{4}$", "5. C — $1\\frac{7}{12}$");
+  assert.deepEqual(testQualityIssues(invalid), ["в вопросе 5 ключ не совпадает с результатом вычисления"]);
+});
+
+test("test validation does not treat the first lone fraction as the expected answer", () => {
+  const comparison = validFractionTest()
+    .replace(
+      /1\. Calculate[\s\S]*?\n\n2\. Calculate/,
+      String.raw`1. Какая дробь больше $\frac{2}{3}$?
+A. $\frac{3}{4}$
+B. $\frac{1}{2}$
+C. $\frac{1}{3}$
+D. $\frac{2}{3}$
+
+2. Calculate`,
+    )
+    .replace(/^1\. B —.*$/m, String.raw`1. A — $\frac{3}{4}$`);
+
+  assert.deepEqual(testQualityIssues(comparison), []);
+});
+
+test("test validation catches a wrong key for a fraction comparison", () => {
+  const comparison = validFractionTest()
+    .replace(
+      /1\. Calculate[\s\S]*?\n\n2\. Calculate/,
+      String.raw`1. Сравните дроби $\frac{3}{4}$ и $\frac{5}{8}$.
+A. $\frac{3}{4} < \frac{5}{8}$
+B. $\frac{3}{4} = \frac{5}{8}$
+C. $\frac{3}{4} > \frac{5}{8}$
+D. Сравнение невозможно
+
+2. Calculate`,
+    );
+
+  assert.deepEqual(testQualityIssues(comparison), ["в вопросе 1 ключ не совпадает с результатом сравнения"]);
+});
+
+test("test validation accepts Rich Markdown emphasis in the answer key", () => {
+  const boldLabels = validFractionTest().replace(/^(\d+)\. ([A-D]) —/gm, "$1. **$2** —");
+  const boldEntries = validFractionTest().replace(/^(\d+)\. ([A-D]) —/gm, "**$1. $2** —");
+  const verboseEntries = validFractionTest().replace(/^(\d+)\. ([A-D]) —/gm, "$1. Правильный ответ: **$2** —");
+  const tableEntries = validFractionTest().replace(/^(\d+)\. ([A-D]) — (.+)$/gm, "| $1 | $2 | $3 |");
+  const cyrillicLabels = validFractionTest().replace(/^(\d+)\. ([ABC]) —/gm, (_, number, label) => `${number}. ${{ A: "А", B: "В", C: "С" }[label]} —`);
+
+  assert.deepEqual(testQualityIssues(boldLabels), []);
+  assert.deepEqual(testQualityIssues(boldEntries), []);
+  assert.deepEqual(testQualityIssues(verboseEntries), []);
+  assert.deepEqual(testQualityIssues(tableEntries), []);
+  assert.deepEqual(testQualityIssues(cyrillicLabels), []);
+});
+
+test("validation rejects references to missing visuals", () => {
+  const invalid = validFractionTest().replace("Calculate $\\frac{2}{3} \\cdot \\frac{5}{7}$.", "На каком рисунке изображён график функции?");
+  const issues = require("../src/generator").richMarkdownIssues({ text: invalid, type: "test", student, topic: "Графики" });
+  assert.ok(issues.includes("есть задание, требующее отсутствующий визуальный материал"));
+});
+
+test("validation rejects internal repair notes", () => {
+  const invalid = `${validFractionTest()}\n\nИсправлены повторы и ошибки. Учтены пробелы ученика.`;
+  const issues = require("../src/generator").richMarkdownIssues({ text: invalid, type: "test", student, topic: "Дроби" });
+  assert.ok(issues.includes("есть служебный комментарий о проверке или исправлениях"));
+});
+
+test("validation rejects an unmatched LaTeX dollar delimiter", () => {
+  const malformed = `${validFractionTest()}\n\n7. Найдите $1\\frac{1}{3} \\cdot \\frac{3}{4}$.`;
+  const issues = require("../src/generator").richMarkdownIssues({ text: malformed.slice(0, -2), type: "test", student, topic: "Дроби" });
+
+  assert.ok(issues.includes("нарушена парность LaTeX-разделителей $ или $$"));
+});
+
+test("generation retries once when a test answer fails mathematical validation", async () => {
+  const invalid = validFractionTest().replace("B. $\\frac{10}{21}$", "B. $\\frac{2}{3}$");
+  const { generator, requests } = mockedGenerator([invalid, validFractionTest()]);
+
+  const { result } = await generator.generate({ type: "test", student, card, topic: "Дроби" });
+
+  assert.equal(result, validFractionTest());
+  assert.equal(requests.length, 2);
+  assert.match(requests[1].messages.at(-1).content, /ключ не совпадает с результатом вычисления/);
+});
+
+test("generation does not return a test that is still invalid after repair", async () => {
+  const invalid = validFractionTest().replace("B. $\\frac{10}{21}$", "B. $\\frac{2}{3}$");
+  const { generator } = mockedGenerator([invalid, invalid]);
+
+  await assert.rejects(
+    () => generator.generate({ type: "test", student, card, topic: "Дроби" }),
+    (error) => error.code === "AI_GENERATION_VALIDATION_FAILED",
+  );
+});
+
+test("generation stops after two validation attempts", async () => {
+  const invalid = validFractionTest().replace("B. $\\frac{10}{21}$", "B. $\\frac{2}{3}$");
+  const { generator, requests } = mockedGenerator([invalid, invalid, validFractionTest()]);
+
+  await assert.rejects(
+    () => generator.generate({ type: "test", student, card, topic: "Дроби" }),
+    (error) => error.code === "AI_GENERATION_VALIDATION_FAILED" && /after 2 attempts/.test(error.message),
+  );
+  assert.equal(requests.length, 2);
+});
+
+test("every test receives a mandatory second pass from the verifier model", async () => {
+  const { generator, requests } = mockedGenerator([validFractionTest(), validFractionTest()]);
+  generator.verifierModel = "qwen/qwen3.5-397b-a17b";
+
+  await generator.generate({ type: "test", student, card, topic: "Дроби" });
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].model, "qwen/qwen3.5-397b-a17b");
+  assert.match(requests[1].messages.at(-1).content, /Реши каждый вопрос заново/);
+  assert.match(requests[1].messages.at(-1).content, /правильный вариант ровно один/);
+  assert.match(requests[1].messages.at(-1).content, /орфографию, пунктуацию, грамматику и согласование слов/);
 });
 
 test("unknown type and adjustment are rejected", async () => {

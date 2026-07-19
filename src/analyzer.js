@@ -1,5 +1,6 @@
 const OpenAI = require("openai");
 const { z } = require("zod");
+const { toMoscowDateString } = require("./time");
 
 const MODEL_PRICING_USD_PER_MILLION_TOKENS = {
   "qwen/qwen3-32b": { input: 0.08, output: 0.28 },
@@ -154,7 +155,7 @@ class LessonAnalyzer {
     }
 
     const lessonDate = transcript.lessonDate instanceof Date
-      ? transcript.lessonDate.toISOString().slice(0, 10)
+      ? toMoscowDateString(transcript.lessonDate)
       : String(transcript.lessonDate).slice(0, 10);
 
     const input = [
@@ -211,7 +212,7 @@ class LessonAnalyzer {
     const currentCard = Object.fromEntries(PROFILE_CARD_FIELDS.map((field) => [field, card?.[field] ?? (field === "topics" || ["strengths", "weaknesses", "gaps", "recommendations"].includes(field) ? [] : "")]));
     const transcriptText = transcripts.map((transcript, index) => {
       const lessonDate = transcript.lessonDate instanceof Date
-        ? transcript.lessonDate.toISOString().slice(0, 10)
+        ? toMoscowDateString(transcript.lessonDate)
         : String(transcript.lessonDate || "").slice(0, 10);
       return [`Урок ${index + 1}. Дата: ${lessonDate || "не указана"}.`, transcript.text].join("\n");
     }).join("\n\n");

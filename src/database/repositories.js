@@ -1,3 +1,5 @@
+const { toMoscowDateString } = require("../time");
+
 class Repository {
   constructor(pool) {
     this.pool = pool;
@@ -208,8 +210,8 @@ class LearningRepository extends Repository {
     }
     return this.rows(`SELECT id, student_id AS "studentId", tutor_id AS "tutorId", lesson_date AS "lessonDate", text, status, analysis_result AS "analysisResult", created_at AS "createdAt" FROM transcripts WHERE student_id = $1 AND tutor_id = $2 ORDER BY lesson_date DESC, id DESC${paging}`, values);
   }
-  async listRecentLessons(studentId, limit = 4, offset = 0) { return this.rows(`SELECT my_klass_lesson_id AS "myKlassLessonId", lesson_date AS "lessonDate", topic FROM my_klass_lessons WHERE student_id = $1 AND lesson_date <= CURRENT_DATE ORDER BY lesson_date DESC, my_klass_lesson_id DESC LIMIT $2 OFFSET $3`, [studentId, limit, offset]); }
-  async getUpcomingLesson(studentId) { return this.one(`SELECT my_klass_lesson_id AS "myKlassLessonId", lesson_date AS "lessonDate", topic FROM my_klass_lessons WHERE student_id = $1 AND lesson_date > CURRENT_DATE ORDER BY lesson_date ASC, my_klass_lesson_id ASC LIMIT 1`, [studentId]); }
+  async listRecentLessons(studentId, limit = 4, offset = 0) { return this.rows(`SELECT my_klass_lesson_id AS "myKlassLessonId", lesson_date AS "lessonDate", topic FROM my_klass_lessons WHERE student_id = $1 AND lesson_date <= $4 ORDER BY lesson_date DESC, my_klass_lesson_id DESC LIMIT $2 OFFSET $3`, [studentId, limit, offset, toMoscowDateString()]); }
+  async getUpcomingLesson(studentId) { return this.one(`SELECT my_klass_lesson_id AS "myKlassLessonId", lesson_date AS "lessonDate", topic FROM my_klass_lessons WHERE student_id = $1 AND lesson_date > $2 ORDER BY lesson_date ASC, my_klass_lesson_id ASC LIMIT 1`, [studentId, toMoscowDateString()]); }
   async getDraft(id, tutorId) { return this.one(`SELECT id, transcript_id AS "transcriptId", student_id AS "studentId", tutor_id AS "tutorId", changes, status, created_at AS "createdAt", updated_at AS "updatedAt", approved_at AS "approvedAt" FROM analysis_drafts WHERE id = $1 AND tutor_id = $2`, [id, tutorId]); }
   async getDraftByTranscript(transcriptId, tutorId) { return this.one(`SELECT id, transcript_id AS "transcriptId", student_id AS "studentId", tutor_id AS "tutorId", changes, status, created_at AS "createdAt", updated_at AS "updatedAt", approved_at AS "approvedAt" FROM analysis_drafts WHERE transcript_id = $1 AND tutor_id = $2`, [transcriptId, tutorId]); }
   async getProfileDraft(id, tutorId) { return this.one(`SELECT id, student_id AS "studentId", tutor_id AS "tutorId", changes, source_transcript_ids AS "sourceTranscriptIds", missing_fields AS "missingFields", status, created_at AS "createdAt", updated_at AS "updatedAt", approved_at AS "approvedAt" FROM profile_analysis_drafts WHERE id = $1 AND tutor_id = $2`, [id, tutorId]); }
@@ -335,7 +337,7 @@ class LearningRepository extends Repository {
       await this.updateCard(draft.studentId, tutorId, { strengths: draft.changes.understood || [], weaknesses: draft.changes.difficulties || [], gaps: draft.changes.gaps || [], recommendations: draft.changes.recommendations || [], nextLessonPlan: draft.changes.nextLessonPlan || null }, "transcript", client);
       await client.query("UPDATE analysis_drafts SET status = 'approved', approved_at = NOW(), updated_at = NOW() WHERE id = $1", [id]);
       await client.query("UPDATE transcripts SET status = 'approved' WHERE id = $1", [draft.transcriptId]);
-      const lastLessonAt = /^\d{4}-\d{2}-\d{2}$/.test(draft.changes.lessonDate || "") ? draft.changes.lessonDate : new Date().toISOString().slice(0, 10);
+      const lastLessonAt = /^\d{4}-\d{2}-\d{2}$/.test(draft.changes.lessonDate || "") ? draft.changes.lessonDate : toMoscowDateString();
       await client.query("UPDATE students SET last_lesson_at = $1 WHERE id = $2", [lastLessonAt, draft.studentId]);
       await client.query("COMMIT");
       return this.getDraft(id, tutorId);
@@ -358,7 +360,7 @@ class GenerationRepository extends Repository {
 }
 
 class MaterialsRepository extends Repository {
-  async upsert({ mtsFileId, name, category, grade, subject, topic, materialType, url }) { await this.pool.query(`INSERT INTO materials (mts_file_id, name, category, grade, subject, topic, material_type, url) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (mts_file_id) DO UPDATE SET name = EXCLUDED.name, category = EXCLUDED.category, grade = EXCLUDED.grade, subject = EXCLUDED.subject, topic = EXCLUDED.topic, material_type = EXCLUDED.material_type, url = EXCLUDED.url, synced_at = NOW()`, [mtsFileId, name, category, grade, subject, topic, materialType, url]); }
+  async upsert({ mtsFileId, name, category, grade, subject, topic, materialType, url, downloadUrl }) { await this.pool.query(`INSERT INTO materials (mts_file_id, name, category, grade, subject, topic, material_type, url, download_url) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (mts_file_id) DO UPDATE SET name = EXCLUDED.name, category = EXCLUDED.category, grade = EXCLUDED.grade, subject = EXCLUDED.subject, topic = EXCLUDED.topic, material_type = EXCLUDED.material_type, url = EXCLUDED.url, download_url = EXCLUDED.download_url, synced_at = NOW()`, [mtsFileId, name, category, grade, subject, topic, materialType, url, downloadUrl || url]); }
   async search({ query, subject, grade, limit = 10 }) {
     const conditions = [];
     const values = [];
@@ -379,18 +381,18 @@ class MaterialsRepository extends Repository {
     if (grade) { values.push(grade); conditions.push(`grade = $${values.length}`); }
     values.push(limit);
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-    return this.rows(`SELECT id, name, category, grade, subject, topic, material_type AS "materialType", url FROM materials ${where} ORDER BY grade NULLS LAST, subject, name LIMIT $${values.length}`, values);
+    return this.rows(`SELECT id, name, category, grade, subject, topic, material_type AS "materialType", url, download_url AS "downloadUrl" FROM materials ${where} ORDER BY grade NULLS LAST, subject, name LIMIT $${values.length}`, values);
   }
 
   // --- Admin metadata editing (spec 20.5) ---
   async list({ limit = 20, offset = 0 } = {}) {
-    return this.rows(`SELECT id, name, category, grade, subject, topic, material_type AS "materialType", url FROM materials ORDER BY subject, grade NULLS LAST, name LIMIT $1 OFFSET $2`, [limit, offset]);
+    return this.rows(`SELECT id, name, category, grade, subject, topic, material_type AS "materialType", url, download_url AS "downloadUrl" FROM materials ORDER BY subject, grade NULLS LAST, name LIMIT $1 OFFSET $2`, [limit, offset]);
   }
-  async getById(id) { return this.one(`SELECT id, name, category, grade, subject, topic, material_type AS "materialType", url FROM materials WHERE id = $1`, [id]); }
+  async getById(id) { return this.one(`SELECT id, name, category, grade, subject, topic, material_type AS "materialType", url, download_url AS "downloadUrl" FROM materials WHERE id = $1`, [id]); }
   // Whitelisted metadata fields only (spec 11.6): name, subject, grade, topic,
-  // material type, url. mts_file_id/category stay owned by the MTS sync.
+  // material type, url, download url. mts_file_id/category stay owned by the MTS sync.
   async updateMetadata(id, patch) {
-    const columns = { name: "name", subject: "subject", grade: "grade", topic: "topic", materialType: "material_type", url: "url" };
+    const columns = { name: "name", subject: "subject", grade: "grade", topic: "topic", materialType: "material_type", url: "url", downloadUrl: "download_url" };
     const sets = [];
     const values = [];
     for (const [key, column] of Object.entries(columns)) {
@@ -400,7 +402,7 @@ class MaterialsRepository extends Repository {
     }
     if (!sets.length) return this.getById(id);
     values.push(id);
-    return this.one(`UPDATE materials SET ${sets.join(", ")} WHERE id = $${values.length} RETURNING id, name, category, grade, subject, topic, material_type AS "materialType", url`, values);
+    return this.one(`UPDATE materials SET ${sets.join(", ")} WHERE id = $${values.length} RETURNING id, name, category, grade, subject, topic, material_type AS "materialType", url, download_url AS "downloadUrl"`, values);
   }
 }
 

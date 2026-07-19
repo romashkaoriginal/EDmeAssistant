@@ -8,6 +8,29 @@ function escapeHtml(value) {
   })[character]);
 }
 
+function normalizeMathDelimiters(segment) {
+  return segment
+    .replace(/\$\$\s*([\s\S]*?)\s*\$\$/g, (_, formula) => `$$${String(formula).trim()}$$`)
+    .replace(/(^|[^\$])\$\s*([^\n$]+?)\s*\$(?!\$)/g, (_, prefix, formula) => `${prefix}$${String(formula).trim()}$`)
+    .replace(/\\\(\s*([\s\S]*?)\s*\\\)/g, (_, formula) => `\\(${String(formula).trim()}\\)`)
+    .replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, (_, formula) => `\\[${String(formula).trim()}\\]`);
+}
+
+// Telegram Rich Markdown supports LaTeX, but model output often inserts spaces
+// right after `$` and before `$`, which causes raw delimiters to leak in UI.
+// We normalize only non-code segments so formulas become parseable consistently.
+function normalizeRichMarkdown(value) {
+  const input = String(value ?? "");
+  const parts = input.split(/(```[\s\S]*?```|`[^`\n]*`)/g);
+  return parts
+    .map((part) => {
+      if (!part) return part;
+      if (part.startsWith("```") || (part.startsWith("`") && part.endsWith("`"))) return part;
+      return normalizeMathDelimiters(part);
+    })
+    .join("");
+}
+
 // Used only as a graceful fallback when Telegram rejects malformed Rich
 // Markdown returned by the model. It intentionally covers the common school
 // formulas instead of trying to be a full LaTeX parser.
@@ -27,4 +50,4 @@ function richMarkdownToPlainText(value) {
     .replace(/[{}]/g, "");
 }
 
-module.exports = { escapeHtml, richMarkdownToPlainText };
+module.exports = { escapeHtml, normalizeRichMarkdown, richMarkdownToPlainText };

@@ -56,6 +56,7 @@ async function start() {
   const generator = new ContentGenerator({
     apiKey: process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY,
     model: process.env.OPENROUTER_MODEL || process.env.OPENAI_MODEL,
+    verifierModel: process.env.OPENROUTER_VERIFIER_MODEL || process.env.OPENAI_VERIFIER_MODEL,
     provider: isOpenRouter ? "openrouter" : "openai",
   });
   const moyKlass = new MoyKlassService({ apiKey: process.env.MOYKLASS_API_KEY });

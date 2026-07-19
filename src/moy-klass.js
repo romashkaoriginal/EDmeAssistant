@@ -1,4 +1,5 @@
 const https = require("node:https");
+const { addDaysMoscowDateString } = require("./time");
 
 const API_URL = "https://api.moyklass.com/v1/company";
 
@@ -250,8 +251,8 @@ class MoyKlassService {
   async syncTeacherStudents(database, tutor, { lookBackDays = 180, lookAheadDays = 60 } = {}) {
     if (!tutor?.my_klass_id) return { lessons: 0, students: 0, lessonsSynced: 0, transcripts: 0 };
     const token = await this.getAccessToken();
-    const from = new Date(Date.now() - lookBackDays * 86_400_000).toISOString().slice(0, 10);
-    const to = new Date(Date.now() + lookAheadDays * 86_400_000).toISOString().slice(0, 10);
+    const from = addDaysMoscowDateString(-lookBackDays);
+    const to = addDaysMoscowDateString(lookAheadDays);
     // Sequential on purpose: Moy Klass rate-limits parallel list calls (HTTP 429).
     // The date window keeps login-time sync bounded for long-running tutors and
     // pulls upcoming lessons so the card can show the next one.

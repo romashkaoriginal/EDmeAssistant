@@ -1,0 +1,15 @@
+meta:
+  environment: node
+  toolchain:
+    name: node
+    version: 22
+
+build:
+  image: node:22
+  install:
+    - npm ci
+
+run:
+  persistenceMount: /data
+  containerPort: 3001
+  command: npm start

@@ -290,6 +290,6 @@ test("student menu no longer offers the manual transcript upload button", async 
   const keyboardTexts = sentKeyboards.flatMap((options) => options.reply_markup.inline_keyboard.flat().map((button) => button.text));
   assert.ok(!keyboardTexts.includes("Добавить расшифровку"), `expected no manual transcript button, got ${JSON.stringify(keyboardTexts)}`);
   assert.ok(keyboardTexts.includes("🧠 Собрать карточку по всем урокам"), "expected the deep profile analysis button");
-  assert.ok(keyboardTexts.some((text) => text.includes("К списку учеников")), "expected a back-to-list button");
+  assert.ok(keyboardTexts.some((text) => text.includes("К ученикам")), "expected a back-to-list button");
   assert.ok(keyboardTexts.some((text) => text.includes("Меню")), "expected a back-to-menu button");
 });

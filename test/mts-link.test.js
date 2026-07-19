@@ -13,6 +13,16 @@ test("MTS Link prefers completed summary over a full dialogue", () => {
   assert.equal(transcript.text, "Ученик понял дискриминант.");
 });
 
+test("MTS Link stores transcript dates in Moscow time", () => {
+  const transcript = MtsLinkService.toLocalTranscript({
+    eventSessionEndsAt: "2026-07-10T22:30:00Z",
+    summary: { status: "completed", text: "ok" },
+    items: [],
+  });
+
+  assert.equal(transcript.lessonDate, "2026-07-11");
+});
+
 test("MTS Link webhook validates the HMAC signature of the original payload", () => {
   const secret = "test-webhook-secret";
   const rawBody = Buffer.from('{"event":"transcript.ready"}');
@@ -68,7 +78,7 @@ test("syncMaterials walks Класс -> Предмет and ЦТ/ЦЭ -> Пред
   const result = await service.syncMaterials(database);
   assert.deepEqual(result, { materials: 2 });
   assert.deepEqual(upserts, [
-    { mtsFileId: "42", name: "1_Квадратные уравнения.pdf", category: "grade", grade: 8, subject: "Математика", topic: "Квадратные уравнения", materialType: "документ", url: "https://files/42.pdf" },
-    { mtsFileId: "99", name: "Тренировочный тест.pdf", category: "ct_ce", grade: null, subject: "Математика", topic: "Тренировочный тест", materialType: "документ", url: "https://files/99.pdf" },
+    { mtsFileId: "42", name: "1_Квадратные уравнения.pdf", category: "grade", grade: 8, subject: "Математика", topic: "Квадратные уравнения", materialType: "документ", url: "https://files/42.pdf", downloadUrl: "https://files/42.pdf" },
+    { mtsFileId: "99", name: "Тренировочный тест.pdf", category: "ct_ce", grade: null, subject: "Математика", topic: "Тренировочный тест", materialType: "документ", url: "https://files/99.pdf", downloadUrl: "https://files/99.pdf" },
   ]);
 });

@@ -1,4 +1,5 @@
 const { escapeHtml } = require("./text");
+const { formatMoscowDate, formatMoscowDateTime } = require("../time");
 
 // Admin panel (spec section 20). Every screen is gated on tutor.is_admin by the
 // caller and again here, so a stale button from a demoted admin cannot act.
@@ -11,21 +12,22 @@ const MATERIAL_FIELDS = {
   grade: { label: "Класс", numeric: true },
   topic: { label: "Тема" },
   materialType: { label: "Тип материала" },
-  url: { label: "Ссылка" },
+  url: { label: "Ссылка (просмотр)" },
+  downloadUrl: { label: "Ссылка (скачать)" },
 };
 
 function formatDateTime(value) {
   if (!value) return "—";
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
+  return formatMoscowDateTime(value);
 }
 
 function formatDate(value) {
   if (!value) return "—";
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" });
+  return formatMoscowDate(value);
 }
 
 // "adm" + screen keeps the admin namespace separate from tutor callbacks.
@@ -218,7 +220,8 @@ function createAdminHandler({ bot, database, sessions }) {
       `Класс: ${material.grade != null ? material.grade : (material.category === "ct_ce" ? "ЦТ/ЦЭ" : "—")}`,
       `Тема: ${escapeHtml(material.topic || "—")}`,
       `Тип: ${escapeHtml(material.materialType || "—")}`,
-      `Ссылка: ${escapeHtml(material.url || "—")}`,
+      `Ссылка (просмотр): ${escapeHtml(material.url || "—")}`,
+      `Ссылка (скачать): ${escapeHtml(material.downloadUrl || "—")}`,
     ];
     const editRows = Object.entries(MATERIAL_FIELDS).map(([field, meta]) => [{ text: `✏️ ${meta.label}`, callback_data: cb("matEdit", String(material.id), field) }]);
     return bot.sendMessage(chatId, lines.join("\n"), {

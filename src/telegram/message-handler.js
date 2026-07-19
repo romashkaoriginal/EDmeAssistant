@@ -1,4 +1,5 @@
 const { blockedMessage } = require("./rate-limiter");
+const { toMoscowDateString } = require("../time");
 
 const MIN_TRANSCRIPT_LENGTH = 20;
 
@@ -75,7 +76,7 @@ function createMessageHandler({ bot, database, generator, sessions, aiGuard, adm
         if (message.text.trim().length < MIN_TRANSCRIPT_LENGTH) {
           return bot.sendMessage(message.chat.id, "Слишком короткий текст для расшифровки. Отправьте более подробное описание урока одним сообщением.");
         }
-        await database.createTranscript({ studentId: session.studentId, tutorId: tutor.id, lessonDate: new Date().toISOString().slice(0, 10), text: message.text });
+        await database.createTranscript({ studentId: session.studentId, tutorId: tutor.id, lessonDate: toMoscowDateString(), text: message.text });
         await sessions.delete(message.from.id);
         return bot.sendMessage(message.chat.id, "Расшифровка сохранена. Откройте «Расшифровки» у ученика и нажмите на неё для анализа.");
       }

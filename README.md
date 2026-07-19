@@ -24,7 +24,8 @@ Set these secrets in Render, never in Git:
 - `DATABASE_URL` - Supabase Session Pooler connection string.
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_WEBHOOK_SECRET`
-- `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` for AI analysis.
+- `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` for AI analysis and generation.
+- `OPENROUTER_VERIFIER_MODEL` for the independent second-pass test audit (falls back to `OPENROUTER_MODEL`).
 - `MOYKLASS_API_KEY` for read-only synchronization of tutors, students, and group membership from "Мой Класс".
 - `MTS_LINK_API_TOKEN`
 - `MTS_LINK_WEBHOOK_SECRET`

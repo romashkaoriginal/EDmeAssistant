@@ -6,16 +6,13 @@ const { createCallbackHandler } = require("./telegram/callback-handler");
 const { createAdminHandler } = require("./telegram/admin-handler");
 const { TelegramSessionStore } = require("./telegram/session-store");
 const { AiCallGuard, blockedMessage } = require("./telegram/rate-limiter");
-const { escapeHtml, richMarkdownToPlainText } = require("./telegram/text");
+const { escapeHtml, normalizeRichMarkdown, richMarkdownToPlainText } = require("./telegram/text");
+const { formatMoscowDate } = require("./time");
 
 const MESSAGE_CHUNK_SIZE = 3900;
 const STUDENTS_PAGE_SIZE = 30;
 
-function formatDate(value) {
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" });
-}
+const formatDate = formatMoscowDate;
 
 function listOrNone(items, empty) {
   return Array.isArray(items) && items.length ? items.map((item) => `- ${escapeHtml(item)}`).join("\n") : empty;
@@ -207,7 +204,10 @@ function materialsText(materials) {
   const lines = materials.map((item, index) => {
     const grade = item.category === "ct_ce" ? "ЦТ/ЦЭ" : (item.grade != null ? `${item.grade} класс` : "");
     const meta = [item.subject, grade, item.materialType].filter(Boolean).join(", ");
-    return `${index + 1}. ${item.topic || item.name}\n${meta}\n${item.url}`;
+    const links = item.downloadUrl && item.downloadUrl !== item.url
+      ? `Просмотр: ${item.url}\nСкачать: ${item.downloadUrl}`
+      : item.url;
+    return `${index + 1}. ${item.topic || item.name}\n${meta}\n${links}`;
   });
   return `Найдено материалов: ${materials.length}\n\n${lines.join("\n\n")}`;
 }
@@ -230,7 +230,7 @@ function splitChunks(text, size = MESSAGE_CHUNK_SIZE) {
 }
 
 async function sendRichMarkdown(bot, chatId, text, options = undefined) {
-  const chunks = splitChunks(text);
+  const chunks = splitChunks(normalizeRichMarkdown(text));
   const sendChunk = async (chunk, chunkOptions) => {
     if (typeof bot.sendRichMessage !== "function") {
       return bot.sendMessage(chatId, richMarkdownToPlainText(chunk), chunkOptions);
@@ -260,12 +260,12 @@ const HELP_TEXT = [
   "",
   "Как пользоваться:",
   "1. Выберите ученика в «Мои ученики».",
-  "2. В меню ученика: «Создать ДЗ», «Создать тест», «Сгенерировать задачи», «Найти материал» — введите тему и получите результат.",
+  "2. В меню ученика: «Создать ДЗ», «Создать тест», «Сген. задачи», «Найти материал» — введите тему и получите результат.",
   "3. Под результатом есть кнопки: заново, проще, сложнее, короче, больше практики, своя правка, а также оценка 👍/👎.",
   "4. Для теста доступны «Версия для ученика» и изменение числа вопросов, для задач — «Решения и ответы».",
   "5. «Расшифровки» — просмотр и ИИ-анализ уроков. Черновик анализа можно отредактировать по кнопкам и только потом подтвердить.",
   "6. «🧠 Собрать карточку по всем урокам» — последовательно проанализировать все расшифровки и получить полный черновик карточки для проверки.",
-  "7. «Редактировать карточку» — ручное обновление карточки ученика.",
+  "7. «Редакт. карточку» — ручное обновление карточки ученика.",
   "8. Любой свободный вопрос можно просто написать в чат — ассистент ответит.",
 ].join("\n");
 
@@ -376,11 +376,11 @@ function createBot({ token, database, analyzer, moyKlass, generator }) {
   const studentMenuKeyboard = (studentId) => ({
     inline_keyboard: [
       [{ text: "Создать ДЗ", callback_data: `gen:${studentId}:homework` }, { text: "Создать тест", callback_data: `gen:${studentId}:test` }],
-      [{ text: "Сгенерировать задачи", callback_data: `gen:${studentId}:tasks` }, { text: "Найти материал", callback_data: `findMaterial:${studentId}` }],
+      [{ text: "Сген. задачи", callback_data: `gen:${studentId}:tasks` }, { text: "Найти материал", callback_data: `findMaterial:${studentId}` }],
       [{ text: "🧠 Собрать карточку по всем урокам", callback_data: `deepProfile:${studentId}` }],
-      [{ text: "Карточка", callback_data: `card:${studentId}` }, { text: "Редактировать карточку", callback_data: `editCard:${studentId}` }],
+      [{ text: "Карточка", callback_data: `card:${studentId}` }, { text: "Редакт. карточку", callback_data: `editCard:${studentId}` }],
       [{ text: "Расшифровки", callback_data: `transcripts:${studentId}` }, { text: "Последние темы", callback_data: `lessons:${studentId}` }],
-      [{ text: "⬅️ К списку учеников", callback_data: "students" }, { text: "🏠 Меню", callback_data: "menu" }],
+      [{ text: "⬅️ К ученикам", callback_data: "students" }, { text: "🏠 Меню", callback_data: "menu" }],
     ],
   });
 

@@ -1,4 +1,5 @@
 const crypto = require("node:crypto");
+const { toMoscowDateString } = require("./time");
 
 const KNOWLEDGE_BASE_FOLDER_NAME = "База Знаний";
 const CT_CE_FOLDER_NAME = "ЦТ/ЦЭ";
@@ -70,7 +71,8 @@ class MtsLinkService {
           subject: subject || "Не указан",
           topic: topicFromFileName(entry.name),
           materialType: materialTypeFromName(entry.name),
-          url: entry.downloadUrl || entry.url,
+          url: entry.url || entry.downloadUrl,
+          downloadUrl: entry.downloadUrl || entry.url,
         });
       }
     }
@@ -140,7 +142,7 @@ class MtsLinkService {
       .join("\n");
     const text = (summary || dialogue).slice(0, 20000);
     if (!text) throw new Error("MTS Link returned an empty transcript");
-    return { lessonDate: (data.eventSessionEndsAt || new Date().toISOString()).slice(0, 10), text };
+    return { lessonDate: toMoscowDateString(data.eventSessionEndsAt || new Date()), text };
   }
 
   async processTranscriptReady(transcriptId) {

@@ -2,6 +2,7 @@ const express = require("express");
 const crypto = require("node:crypto");
 const { z } = require("zod");
 const { runLessonAnalysis } = require("./analysis-runner");
+const { toMoscowIsoString } = require("./time");
 
 const idSchema = z.coerce.number().int().positive();
 const tutorIdSchema = z.coerce.number().int().positive();
@@ -74,10 +75,10 @@ function createApp({ database, analyzer, mtsLink, moyKlass, telegramBot, telegra
   app.get("/health", async (_req, res) => {
     try {
       if (typeof database.ping === "function") await database.ping();
-      return res.json({ ok: true, service: "EDmeAssistant backend", db: "up", timestamp: new Date().toISOString() });
+      return res.json({ ok: true, service: "EDmeAssistant backend", db: "up", timestamp: toMoscowIsoString() });
     } catch (error) {
       console.error("Health check failed", error);
-      return res.status(503).json({ ok: false, service: "EDmeAssistant backend", db: "down", timestamp: new Date().toISOString() });
+      return res.status(503).json({ ok: false, service: "EDmeAssistant backend", db: "down", timestamp: toMoscowIsoString() });
     }
   });
 
