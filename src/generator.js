@@ -263,6 +263,17 @@ function parseTestAnswers(text) {
   return entries;
 }
 
+function normalizeTestOptionLineBreaks(text) {
+  const value = String(text ?? "");
+  const markerIndex = value.indexOf(ANSWERS_MARKER);
+  const questions = markerIndex === -1 ? value : value.slice(0, markerIndex);
+  const answers = markerIndex === -1 ? "" : value.slice(markerIndex);
+
+  // Models occasionally put A–D after each other in one line. Telegram then
+  // renders a dense, unreadable test even though the content is otherwise valid.
+  return `${questions.replace(/([^\n])(?:[ \t]+)([A-D])\.\s+(?=\S)/g, "$1\n$2. ")}${answers}`;
+}
+
 function testQualityIssues(text) {
   const value = String(text || "");
   const markerIndex = value.indexOf(ANSWERS_MARKER);
@@ -483,6 +494,7 @@ class ContentGenerator {
 
     const messages = this.buildMessages({ type, student, card, topic, adjustment, previousResult, customInstruction: instruction });
     let result = await this.complete(messages);
+    if (type === "test") result = normalizeTestOptionLineBreaks(result);
     const validate = (candidate) => [
       ...richMarkdownIssues({ text: candidate, type, student, topic }),
       ...(type === "test" ? testQualityIssues(candidate) : []),
@@ -498,6 +510,7 @@ class ContentGenerator {
         { role: "assistant", content: result },
         { role: "user", content: correction },
       ], { model: type === "test" ? this.verifierModel : this.model });
+      if (type === "test") result = normalizeTestOptionLineBreaks(result);
       issues = validate(result);
     }
     if (issues.length) {
@@ -567,5 +580,5 @@ class ContentGenerator {
 module.exports = {
   ContentGenerator, GENERATION_TYPES, ADJUSTMENTS, studentVersion, richMarkdownIssues,
   ANSWERS_MARKER, RICH_MARKDOWN_INSTRUCTIONS, FREEFORM_RICH_MARKDOWN_INSTRUCTIONS,
-  QUALITY_INSTRUCTIONS, testQualityIssues, normalizeFreeformLatex,
+  QUALITY_INSTRUCTIONS, testQualityIssues, normalizeFreeformLatex, normalizeTestOptionLineBreaks,
 };

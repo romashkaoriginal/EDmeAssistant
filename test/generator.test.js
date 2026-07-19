@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { ContentGenerator, GENERATION_TYPES, ADJUSTMENTS, studentVersion, ANSWERS_MARKER, testQualityIssues, normalizeFreeformLatex } = require("../src/generator");
+const { ContentGenerator, GENERATION_TYPES, ADJUSTMENTS, studentVersion, ANSWERS_MARKER, testQualityIssues, normalizeFreeformLatex, normalizeTestOptionLineBreaks } = require("../src/generator");
 
 const student = { full_name: "Иван Петров", subject: "Математика", grade: 8 };
 const card = {
@@ -207,6 +207,22 @@ C. $\frac{12}{35}$
 D. $1$`, String.raw`A. $\frac{7}{10}$ B. $\frac{10}{21}$ C. $\frac{12}{35}$ D. $1$`);
 
   assert.deepEqual(testQualityIssues(invalid), ["в вопросе 1 должны быть варианты A, B, C и D"]);
+});
+
+test("test option normalizer puts inline options on separate lines", () => {
+  const input = String.raw`1. Вычислите: $2 + 2$. A. 3 B. 4 C. 5 D. 6
+
+${ANSWERS_MARKER}
+1. B — $2 + 2 = 4$.`;
+
+  assert.equal(normalizeTestOptionLineBreaks(input), String.raw`1. Вычислите: $2 + 2$.
+A. 3
+B. 4
+C. 5
+D. 6
+
+${ANSWERS_MARKER}
+1. B — $2 + 2 = 4$.`);
 });
 
 test("validation rejects references to missing visuals", () => {
