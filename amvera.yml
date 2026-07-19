@@ -1,15 +1,10 @@
 meta:
   environment: node
   toolchain:
-    name: node
+    name: npm
     version: 22
 
-build:
-  image: node:22
-  install:
-    - npm ci
-
 run:
-  persistenceMount: /data
+  scriptName: src/server.js
   containerPort: 3001
-  command: npm start
+  persistenceMount: /data
