@@ -1,3 +1,4 @@
+const dns = require("node:dns");
 const dotenv = require("dotenv");
 const { PostgresDatabase } = require("./postgres-database");
 const { LessonAnalyzer } = require("./analyzer");
@@ -8,6 +9,10 @@ const { MtsLinkService } = require("./mts-link");
 const { MoyKlassService } = require("./moy-klass");
 
 dotenv.config({ override: true, quiet: true });
+
+// The hosting environment's IPv6 route to external APIs (Telegram, Moy Klass)
+// times out; resolving A records first avoids that path entirely.
+dns.setDefaultResultOrder("ipv4first");
 
 const port = Number(process.env.PORT || 3001);
 
