@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { ContentGenerator, GENERATION_TYPES, ADJUSTMENTS, studentVersion, ANSWERS_MARKER, testQualityIssues } = require("../src/generator");
+const { ContentGenerator, GENERATION_TYPES, ADJUSTMENTS, studentVersion, ANSWERS_MARKER, testQualityIssues, normalizeFreeformLatex } = require("../src/generator");
 
 const student = { full_name: "Иван Петров", subject: "Математика", grade: 8 };
 const card = {
@@ -294,7 +294,25 @@ test("freeform answers with a methodist system prompt", async () => {
   const [request] = requests;
   assert.equal(request.messages[0].role, "system");
   assert.match(request.messages[0].content, /методист/);
+  assert.match(request.messages[0].content, /без математических разделителей/);
   assert.equal(request.messages[1].content, "Как объяснить дроби пятикласснику?");
+});
+
+test("freeform removes Markdown math wrappers and double-escaped LaTeX", async () => {
+  const answer = String.raw`Пример:
+
+$ \frac{2}{5} \div \frac{4}{10} = 1 $
+
+Допустимо, только если $ c \\neq 0 $.`;
+  const { generator } = mockedGenerator(answer);
+  const { result } = await generator.freeform({ question: "Как делить дроби?" });
+
+  assert.equal(result, String.raw`Пример:
+
+\frac{2}{5} \div \frac{4}{10} = 1
+
+Допустимо, только если c \neq 0.`);
+  assert.equal(normalizeFreeformLatex(String.raw`$$ \frac{3}{4} $$`), String.raw`\frac{3}{4}`);
 });
 
 test("freeform system prompt instructs the model to refuse off-topic questions", async () => {

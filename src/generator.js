@@ -8,6 +8,10 @@ const RICH_MARKDOWN_INSTRUCTIONS = String.raw`Форматируй ответ в
 Дроби всегда записывай через \frac{числитель}{знаменатель}, например: $\frac{3}{4} + \frac{1}{8}$. Смешанное число записывай так: $1\frac{1}{2}$.
 Не оставляй математические выражения в виде обычного текста вроде 3/4 и не используй для формул обратные кавычки.`;
 
+const FREEFORM_RICH_MARKDOWN_INSTRUCTIONS = String.raw`Форматируй ответ для Telegram Rich Markdown: используй заголовки, списки и **жирные** подписи.
+Для формул используй LaTeX-команды без математических разделителей: пиши \frac{3}{4}, \div, \neq, \sqrt{2} прямо в тексте или с новой строки.
+Никогда не используй для формул $...$, $$...$$, \(...\), \[...\], обратные кавычки или блоки кода. Не экранируй LaTeX-команды двойным обратным слешем: правильно \neq, а не \\neq.`;
+
 const QUALITY_INSTRUCTIONS = `Перед выдачей результата молча проверь его:
 - все задания строго относятся к теме пользователя;
 - условия однозначны и содержат все необходимые ограничения и области определения;
@@ -368,6 +372,19 @@ function hasBalancedMathDelimiters(text) {
   return openLength === 0;
 }
 
+function normalizeFreeformLatex(value) {
+  return String(value ?? "")
+    // Telegram Rich Messages can render `$...$` as a preformatted block.
+    // Keep the formula and remove only its Markdown wrapper.
+    .replace(/\$\$\s*([\s\S]*?)\s*\$\$/g, (_, formula) => String(formula).trim())
+    .replace(/\$\s*([^$\n]+?)\s*\$/g, (_, formula) => String(formula).trim())
+    .replace(/\\\(\s*([\s\S]*?)\s*\\\)/g, (_, formula) => String(formula).trim())
+    .replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, (_, formula) => String(formula).trim())
+    // Double slashes are Markdown escaping, not LaTeX commands for Telegram.
+    .replace(/\\\\(?=(?:frac|sqrt|div|times|cdot|neq|leq|geq|le|ge|pm|infty|left|right)\b)/g, "\\")
+    .trim();
+}
+
 function richMarkdownIssues({ text, type, student, topic }) {
   const issues = [];
   const value = String(text || "");
@@ -526,7 +543,7 @@ class ContentGenerator {
       "Если вопрос не относится к этим темам (кулинария, рецепты, развлечения, новости, личные советы, программирование не по теме бота, общая эрудиция и т.п.) — не отвечай по существу вообще, даже кратко или частично. Вместо этого ответь ровно в таком духе: \"Я отвечаю только на вопросы, связанные с репетиторством и подготовкой к занятиям. Задайте вопрос по предмету, ученику или методике.\"",
       "При сомнении, относится ли вопрос к разрешённым темам, считай, что не относится, и откажи.",
       "Отвечай на вопросы репетитора по-русски, кратко и по делу.",
-      RICH_MARKDOWN_INSTRUCTIONS,
+      FREEFORM_RICH_MARKDOWN_INSTRUCTIONS,
       "Объём ответа — не более 2500 символов.",
     ].join(" ");
     let text;
@@ -542,11 +559,12 @@ class ContentGenerator {
       text = response.output_text;
     }
     if (!text || !text.trim()) throw new Error("AI returned an empty answer");
-    return { result: text.trim() };
+    return { result: normalizeFreeformLatex(text) };
   }
 }
 
 module.exports = {
   ContentGenerator, GENERATION_TYPES, ADJUSTMENTS, studentVersion, richMarkdownIssues,
-  ANSWERS_MARKER, RICH_MARKDOWN_INSTRUCTIONS, QUALITY_INSTRUCTIONS, testQualityIssues,
+  ANSWERS_MARKER, RICH_MARKDOWN_INSTRUCTIONS, FREEFORM_RICH_MARKDOWN_INSTRUCTIONS,
+  QUALITY_INSTRUCTIONS, testQualityIssues, normalizeFreeformLatex,
 };
