@@ -9,8 +9,8 @@ const RICH_MARKDOWN_INSTRUCTIONS = String.raw`Форматируй ответ в
 Не оставляй математические выражения в виде обычного текста вроде 3/4 и не используй для формул обратные кавычки.`;
 
 const FREEFORM_RICH_MARKDOWN_INSTRUCTIONS = String.raw`Форматируй ответ для Telegram Rich Markdown: используй заголовки, списки и **жирные** подписи.
-Для формул используй LaTeX-команды без математических разделителей: пиши \frac{3}{4}, \div, \neq, \sqrt{2} прямо в тексте или с новой строки.
-Никогда не используй для формул $...$, $$...$$, \(...\), \[...\], обратные кавычки или блоки кода. Не экранируй LaTeX-команды двойным обратным слешем: правильно \neq, а не \\neq.`;
+Каждую математическую запись оформляй как LaTeX: короткую формулу помещай между $...$, отдельную большую формулу — между $$...$$. Дроби всегда записывай через \frac{числитель}{знаменатель}, например: $\frac{3}{4} + \frac{1}{8}$.
+Не ставь пробелы сразу после открывающего $ или перед закрывающим $. Не используй для формул обратные кавычки или блоки кода. Не экранируй LaTeX-команды двойным обратным слешем: правильно \neq, а не \\neq.`;
 
 const QUALITY_INSTRUCTIONS = `Перед выдачей результата молча проверь его:
 - все задания строго относятся к теме пользователя;
@@ -374,12 +374,12 @@ function hasBalancedMathDelimiters(text) {
 
 function normalizeFreeformLatex(value) {
   return String(value ?? "")
-    // Telegram Rich Messages can render `$...$` as a preformatted block.
-    // Keep the formula and remove only its Markdown wrapper.
-    .replace(/\$\$\s*([\s\S]*?)\s*\$\$/g, (_, formula) => String(formula).trim())
-    .replace(/\$\s*([^$\n]+?)\s*\$/g, (_, formula) => String(formula).trim())
-    .replace(/\\\(\s*([\s\S]*?)\s*\\\)/g, (_, formula) => String(formula).trim())
-    .replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, (_, formula) => String(formula).trim())
+    // Rich Messages renders LaTeX only when it remains inside `$...$` / `$$...$$`.
+    // Remove padding that can break parsing, but preserve the delimiters.
+    .replace(/\$\$\s*([\s\S]*?)\s*\$\$/g, (_, formula) => `$$${String(formula).trim()}$$`)
+    .replace(/(^|[^$])\$\s*([^$\n]+?)\s*\$(?!\$)/g, (_, prefix, formula) => `${prefix}$${String(formula).trim()}$`)
+    .replace(/\\\(\s*([\s\S]*?)\s*\\\)/g, (_, formula) => `$${String(formula).trim()}$`)
+    .replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, (_, formula) => `$$${String(formula).trim()}$$`)
     // Double slashes are Markdown escaping, not LaTeX commands for Telegram.
     .replace(/\\\\(?=(?:frac|sqrt|div|times|cdot|neq|leq|geq|le|ge|pm|infty|left|right)\b)/g, "\\")
     .trim();

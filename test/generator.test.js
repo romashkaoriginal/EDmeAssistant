@@ -294,11 +294,11 @@ test("freeform answers with a methodist system prompt", async () => {
   const [request] = requests;
   assert.equal(request.messages[0].role, "system");
   assert.match(request.messages[0].content, /методист/);
-  assert.match(request.messages[0].content, /без математических разделителей/);
+  assert.match(request.messages[0].content, /между \$\.\.\.\$/);
   assert.equal(request.messages[1].content, "Как объяснить дроби пятикласснику?");
 });
 
-test("freeform removes Markdown math wrappers and double-escaped LaTeX", async () => {
+test("freeform preserves Markdown math wrappers and normalizes LaTeX", async () => {
   const answer = String.raw`Пример:
 
 $ \frac{2}{5} \div \frac{4}{10} = 1 $
@@ -309,10 +309,10 @@ $ \frac{2}{5} \div \frac{4}{10} = 1 $
 
   assert.equal(result, String.raw`Пример:
 
-\frac{2}{5} \div \frac{4}{10} = 1
+$\frac{2}{5} \div \frac{4}{10} = 1$
 
-Допустимо, только если c \neq 0.`);
-  assert.equal(normalizeFreeformLatex(String.raw`$$ \frac{3}{4} $$`), String.raw`\frac{3}{4}`);
+Допустимо, только если $c \neq 0$.`);
+  assert.equal(normalizeFreeformLatex(String.raw`$$ \frac{3}{4} $$`), String.raw`$$\frac{3}{4}$$`);
 });
 
 test("freeform system prompt instructs the model to refuse off-topic questions", async () => {
