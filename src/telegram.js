@@ -39,7 +39,7 @@ function studentCardMarkup(student, card, recentLessons = [], upcomingLesson = n
     `<b>Цель обучения:</b> ${card.learningGoal || "не указана"}`,
     `<b>Особенности:</b> ${card.features || "не указаны"}`,
     "",
-    "<b>Изученные темы по расшифровкам</b>",
+    "<b>Пройденные темы (по анализу уроков)</b>",
     listOrNone(card.topics, "Не указаны"),
     "",
     "<b>Сильные стороны</b>",
@@ -326,9 +326,28 @@ function createBot({ token, database, analyzer, moyKlass, generator }) {
     if (!rows.length) {
       return bot.sendMessage(chatId, "Пока нет учеников. Нажмите «Обновить учеников» или отправьте /refresh.");
     }
-    const page = rows.slice(offset, offset + STUDENTS_PAGE_SIZE);
-    const keyboard = page.map((student) => [{ text: studentButtonLabel(student), callback_data: `student:${student.id}` }]);
-    const remaining = rows.length - offset - STUDENTS_PAGE_SIZE;
+    // Group by grade so a tutor scanning a long list finds a student faster.
+    // Known grades ascending first, "класс не указан" last; alphabetical inside.
+    const sorted = [...rows].sort((a, b) => {
+      const gradeA = a.grade == null ? Infinity : Number(a.grade);
+      const gradeB = b.grade == null ? Infinity : Number(b.grade);
+      if (gradeA !== gradeB) return gradeA - gradeB;
+      return String(a.full_name).localeCompare(String(b.full_name), "ru");
+    });
+    const page = sorted.slice(offset, offset + STUDENTS_PAGE_SIZE);
+    const keyboard = [];
+    let lastGradeHeader = null;
+    for (const student of page) {
+      const header = student.grade == null ? "Класс не указан" : `${student.grade} класс`;
+      if (header !== lastGradeHeader) {
+        // Non-interactive separator row (callback "noop" is ignored) that acts
+        // as a grade heading between groups.
+        keyboard.push([{ text: `— ${header} —`, callback_data: "noop" }]);
+        lastGradeHeader = header;
+      }
+      keyboard.push([{ text: studentButtonLabel(student), callback_data: `student:${student.id}` }]);
+    }
+    const remaining = sorted.length - offset - STUDENTS_PAGE_SIZE;
     if (remaining > 0) keyboard.push([{ text: `Показать ещё (${remaining})`, callback_data: `studentsPage:${offset + STUDENTS_PAGE_SIZE}` }]);
     return bot.sendMessage(chatId, "Выберите ученика:", {
       reply_markup: { inline_keyboard: keyboard },
@@ -391,6 +410,18 @@ function createBot({ token, database, analyzer, moyKlass, generator }) {
     { text: "⬅️ К карточке", callback_data: `student:${studentId}` },
     { text: "🏠 Меню", callback_data: "menu" },
   ];
+
+  // Field picker for manual card editing. Shown both when the tutor opens
+  // "Редакт. карточку" and again right after each save, so several fields can
+  // be corrected in one pass instead of re-opening the menu every time.
+  const editCardKeyboard = (studentId) => {
+    const rows = Object.entries(CARD_FIELDS).map(([field, meta]) => [{ text: meta.label, callback_data: `editField:${studentId}:${field}` }]);
+    rows.push([
+      { text: "✅ Готово, к карточке", callback_data: `student:${studentId}` },
+      { text: "🏠 Меню", callback_data: "menu" },
+    ]);
+    return { inline_keyboard: rows };
+  };
 
   // Re-shown after any card-changing action (manual field edit, draft approval)
   // so the tutor lands back on the student instead of hunting for them again.
@@ -570,12 +601,12 @@ function createBot({ token, database, analyzer, moyKlass, generator }) {
   }));
 
   bot.on("callback_query", createCallbackHandler({
-    bot, database, analyzer, generator, sessions, aiGuard, adminHandler, logout, refreshStudents, sendStudentList, sendGeneration, sendChunked, sendDraft, sendProfileDraft, sendStudentCard, menu, backToStudentRow,
+    bot, database, analyzer, generator, sessions, aiGuard, adminHandler, logout, refreshStudents, sendStudentList, sendGeneration, sendChunked, sendDraft, sendProfileDraft, sendStudentCard, menu, backToStudentRow, editCardKeyboard,
     formatDate, studentCardText, cardFieldValueText, draftFieldValueText, profileDraftFieldValueText, materialsText, HELP_TEXT, FEEDBACK_REASONS, CARD_FIELDS, DRAFT_FIELDS, PROFILE_DRAFT_FIELDS, GENERATION_TYPES, studentVersion, runLessonAnalysis, runProfileAnalysis,
   }));
 
   bot.on("message", createMessageHandler({
-    bot, database, generator, sessions, aiGuard, adminHandler, handleFreeform, menu, refreshStudents, sendGeneration, sendDraft, sendProfileDraft, sendStudentCard, CARD_FIELDS, DRAFT_FIELDS, PROFILE_DRAFT_FIELDS, cardFieldValueText, materialsText,
+    bot, database, generator, sessions, aiGuard, adminHandler, handleFreeform, menu, refreshStudents, sendGeneration, sendDraft, sendProfileDraft, sendStudentCard, editCardKeyboard, CARD_FIELDS, DRAFT_FIELDS, PROFILE_DRAFT_FIELDS, cardFieldValueText, materialsText,
   }));
 
   return bot;

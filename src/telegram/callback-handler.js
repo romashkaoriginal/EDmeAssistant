@@ -4,7 +4,7 @@ const { blockedMessage } = require("./rate-limiter");
 const TRANSCRIPTS_PAGE_SIZE = 10;
 const LESSONS_PAGE_SIZE = 4;
 
-function createCallbackHandler({ bot, database, analyzer, generator, sessions, aiGuard, adminHandler, logout, refreshStudents, sendStudentList, sendGeneration, sendChunked, sendDraft, sendProfileDraft, sendStudentCard, menu, backToStudentRow, formatDate, studentCardText, cardFieldValueText, draftFieldValueText, profileDraftFieldValueText, materialsText, HELP_TEXT, FEEDBACK_REASONS, CARD_FIELDS, DRAFT_FIELDS, PROFILE_DRAFT_FIELDS, GENERATION_TYPES, studentVersion, runLessonAnalysis, runProfileAnalysis }) {
+function createCallbackHandler({ bot, database, analyzer, generator, sessions, aiGuard, adminHandler, logout, refreshStudents, sendStudentList, sendGeneration, sendChunked, sendDraft, sendProfileDraft, sendStudentCard, menu, backToStudentRow, editCardKeyboard, formatDate, studentCardText, cardFieldValueText, draftFieldValueText, profileDraftFieldValueText, materialsText, HELP_TEXT, FEEDBACK_REASONS, CARD_FIELDS, DRAFT_FIELDS, PROFILE_DRAFT_FIELDS, GENERATION_TYPES, studentVersion, runLessonAnalysis, runProfileAnalysis }) {
   const AI_UNAVAILABLE_TEXT = "ИИ недоступен: настройте ключ ИИ на сервере.";
 
   return async (query) => {
@@ -15,6 +15,10 @@ function createCallbackHandler({ bot, database, analyzer, generator, sessions, a
     const chatId = query.message?.chat?.id;
     if (chatId == null) return;
     try {
+      // Non-interactive separator buttons (e.g. grade headings in the student
+      // list) carry "noop": acknowledge silently and do nothing.
+      if (query.data === "noop") return;
+
       if (query.data === "logout") {
         await logout(query.from.id, chatId);
         return;
@@ -269,10 +273,8 @@ function createCallbackHandler({ bot, database, analyzer, generator, sessions, a
         });
       }
       if (action === "editCard") {
-        const rows = Object.entries(CARD_FIELDS).map(([field, meta]) => [{ text: meta.label, callback_data: `editField:${id}:${field}` }]);
-        rows.push(backToStudentRow(id));
         return bot.sendMessage(chatId, "Что редактируем?", {
-          reply_markup: { inline_keyboard: rows },
+          reply_markup: editCardKeyboard(id),
         });
       }
       if (action === "editField") {

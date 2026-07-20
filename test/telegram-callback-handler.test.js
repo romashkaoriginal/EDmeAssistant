@@ -243,6 +243,7 @@ test("editCard menu offers a way back to the student's card instead of a dead en
     sendStudentList: async () => {},
     sendGeneration: async () => {},
     backToStudentRow: (studentId) => [{ text: "⬅️ К карточке", callback_data: `student:${studentId}` }, { text: "🏠 Меню", callback_data: "menu" }],
+    editCardKeyboard: (studentId) => ({ inline_keyboard: [[{ text: "✅ Готово, к карточке", callback_data: `student:${studentId}` }, { text: "🏠 Меню", callback_data: "menu" }]] }),
     formatDate: () => "",
     studentCardText: () => "",
     cardFieldValueText: () => "",

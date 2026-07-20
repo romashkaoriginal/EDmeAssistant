@@ -3,7 +3,7 @@ const { toMoscowDateString } = require("../time");
 
 const MIN_TRANSCRIPT_LENGTH = 20;
 
-function createMessageHandler({ bot, database, generator, sessions, aiGuard, adminHandler, handleFreeform, menu, refreshStudents, sendGeneration, sendDraft, sendProfileDraft, sendStudentCard, CARD_FIELDS, DRAFT_FIELDS, PROFILE_DRAFT_FIELDS, cardFieldValueText, materialsText }) {
+function createMessageHandler({ bot, database, generator, sessions, aiGuard, adminHandler, handleFreeform, menu, refreshStudents, sendGeneration, sendDraft, sendProfileDraft, sendStudentCard, editCardKeyboard, CARD_FIELDS, DRAFT_FIELDS, PROFILE_DRAFT_FIELDS, cardFieldValueText, materialsText }) {
   const AI_UNAVAILABLE_TEXT = "ИИ недоступен: настройте ключ ИИ на сервере.";
 
   return async (message) => {
@@ -90,12 +90,12 @@ function createMessageHandler({ bot, database, generator, sessions, aiGuard, adm
           : message.text.trim();
         await sessions.delete(message.from.id);
         const card = await database.updateCard(studentId, tutor.id, { [field]: value });
-        await bot.sendMessage(message.chat.id, `<b>${CARD_FIELDS[field].label}</b> обновлено:\n${cardFieldValueText(card, field)}`, { parse_mode: "HTML" });
-        // Land back on the student's card so the tutor doesn't have to search
-        // for them again after an edit.
-        const student = await database.getStudent(studentId, tutor.id);
-        if (student) await sendStudentCard(message.chat.id, student);
-        return;
+        // Re-open the field picker instead of the full card so the tutor can
+        // fix several fields in one pass; "Готово" returns to the card.
+        return bot.sendMessage(message.chat.id, `<b>${CARD_FIELDS[field].label}</b> обновлено:\n${cardFieldValueText(card, field)}\n\nЧто редактируем дальше?`, {
+          parse_mode: "HTML",
+          reply_markup: editCardKeyboard(studentId),
+        });
       }
 
       if (session.action === "editDraftField") {

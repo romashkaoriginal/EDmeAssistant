@@ -214,6 +214,10 @@ class MoyKlassService {
       const tutor = tutors.get(String(join.managerId));
       const user = usersById.get(String(join.userId));
       if (!tutor || !user) continue;
+      // Same filter as syncTeacherStudents: skip leads, trial no-shows and
+      // cancelled/inactive clients so a trial-only student never lands in a
+      // tutor's active list.
+      if (!isAllowedClientState(user)) continue;
       const pairKey = `${tutor.id}:${user.id}`;
       if (linkedPairs.has(pairKey)) continue;
       linkedPairs.add(pairKey);
