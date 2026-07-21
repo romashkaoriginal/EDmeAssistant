@@ -550,6 +550,7 @@ class ContentGenerator {
 
   async complete(messages, { model = this.model, reasoningEffort = null, timeoutMs = null } = {}) {
     let text;
+    let responseDiagnostics;
     if (this.provider === "openrouter") {
       const useReasoning = this.isDeepSeekV4Pro(model) && reasoningEffort;
       const response = await this.client.chat.completions.create({
@@ -560,7 +561,23 @@ class ContentGenerator {
           : MAX_OUTPUT_TOKENS,
         ...(useReasoning && { reasoning: { effort: reasoningEffort } }),
       }, timeoutMs ? { timeout: timeoutMs } : undefined);
-      text = response.choices[0]?.message?.content;
+      const choice = response.choices[0];
+      const message = choice?.message || {};
+      const reasoning = message.reasoning ?? message.reasoning_content ?? "";
+      text = message.content;
+      responseDiagnostics = {
+        provider: "openrouter",
+        responseModel: response.model,
+        finishReason: choice?.finish_reason,
+        usage: response.usage && {
+          promptTokens: response.usage.prompt_tokens,
+          completionTokens: response.usage.completion_tokens,
+          totalTokens: response.usage.total_tokens,
+          reasoningTokens: response.usage.completion_tokens_details?.reasoning_tokens,
+        },
+        contentLength: String(text ?? "").length,
+        reasoningLength: String(reasoning ?? "").length,
+      };
     } else {
       const response = await this.client.responses.create({
         model,
@@ -570,12 +587,25 @@ class ContentGenerator {
         input: messages.slice(1).map((item) => `${item.role === "user" ? "" : "Предыдущий вариант:\n"}${item.content}`).join("\n\n"),
       });
       text = response.output_text;
+      responseDiagnostics = {
+        provider: "openai",
+        responseModel: response.model,
+        status: response.status,
+        usage: response.usage && {
+          inputTokens: response.usage.input_tokens,
+          outputTokens: response.usage.output_tokens,
+          totalTokens: response.usage.total_tokens,
+          reasoningTokens: response.usage.output_tokens_details?.reasoning_tokens,
+        },
+        contentLength: String(text ?? "").length,
+      };
     }
     if (!text || !text.trim()) {
       const error = new Error("AI returned an empty generation");
       error.code = "AI_EMPTY_RESPONSE";
       error.aiModel = model;
       error.reasoningEffort = reasoningEffort;
+      error.aiResponse = responseDiagnostics;
       throw error;
     }
     return text.trim();

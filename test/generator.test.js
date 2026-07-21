@@ -379,6 +379,29 @@ test("a malformed test is still rejected when verifier is empty", async () => {
   );
 });
 
+test("empty provider response contains safe diagnostics", async () => {
+  const { generator } = mockedGenerator("");
+  generator.client.chat.completions.create = async () => ({
+    model: "deepseek/deepseek-v4-pro",
+    choices: [{ finish_reason: "length", message: { content: "", reasoning: "internal reasoning" } }],
+    usage: {
+      prompt_tokens: 120,
+      completion_tokens: 4000,
+      total_tokens: 4120,
+      completion_tokens_details: { reasoning_tokens: 3900 },
+    },
+  });
+
+  await assert.rejects(
+    () => generator.generate({ type: "homework", student, card, topic: "Функции" }),
+    (error) => error.code === "AI_EMPTY_RESPONSE"
+      && error.aiResponse.finishReason === "length"
+      && error.aiResponse.contentLength === 0
+      && error.aiResponse.reasoningLength === 18
+      && error.aiResponse.usage.reasoningTokens === 3900,
+  );
+});
+
 test("solutions receive the verifier pass", async () => {
   const { generator, requests } = mockedGenerator(["# Решения\n\n$2 + 2 = 4$", "# Решения\n\n$2 + 2 = 4$"]);
   generator.verifierModel = "deepseek/deepseek-v4-pro";
