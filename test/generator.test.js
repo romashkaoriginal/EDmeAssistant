@@ -244,6 +244,13 @@ test("validation rejects an unmatched LaTeX dollar delimiter", () => {
   assert.ok(issues.includes("нарушена парность LaTeX-разделителей $ или $$"));
 });
 
+test("validation rejects LaTeX commands outside math delimiters", () => {
+  const invalid = "# Материал\n\nФормула вершины: x_в = -\\frac{b}{2a}.";
+  const issues = require("../src/generator").richMarkdownIssues({ text: invalid, type: "homework", student, topic: "Функции" });
+
+  assert.ok(issues.includes("есть LaTeX-команда вне $...$ или $$...$$"));
+});
+
 test("validation rejects unsupported Telegram LaTeX environments", () => {
   const invalid = String.raw`# Материал
 
@@ -310,6 +317,8 @@ test("homework and task sets receive a mandatory second pass from the verifier m
     assert.equal(requests[1].model, "deepseek/deepseek-v4-pro");
     assert.match(requests[1].messages.at(-1).content, /независимую строгую проверку предыдущего учебного материала/);
     assert.match(requests[1].messages.at(-1).content, /отдельно найди ОДЗ/);
+    assert.match(requests[0].messages[0].content, /открытые задания без готовых вариантов ответа/);
+    assert.match(requests[1].messages.at(-1).content, /проверять только знания, необходимые для указанной темы/);
   }
 });
 

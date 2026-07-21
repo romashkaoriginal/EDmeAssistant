@@ -154,12 +154,9 @@ function createMessageHandler({ bot, database, generator, sessions, aiGuard, adm
             await sessions.delete(message.from.id);
             const card = await database.getCard(session.studentId);
             const label = session.type === "homework" ? "домашнее задание" : session.type === "test" ? "тест" : "задачи";
-            await bot.sendMessage(message.chat.id, `Генерирую ${label}. Тема: ${topic}. Сначала подготовлю материал, затем перепроверю его — это может занять до двух минут.`);
+            await bot.sendMessage(message.chat.id, `Генерирую ${label}. Тема: ${topic}.`);
             const { result } = await generator.generate({
               type: session.type, student, card, topic,
-              onProgress: async ({ stage }) => {
-                if (stage === "auditing") await bot.sendMessage(message.chat.id, "Черновик готов. Перепроверяю факты, математику и форматирование…").catch(() => {});
-              },
             });
             const generation = await database.createGeneration({
               type: session.type, studentId: student.id, tutorId: tutor.id, topic, result,
