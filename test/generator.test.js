@@ -54,7 +54,7 @@ test("generation prompt includes the card, topic, adjustment and self-check", as
   const [request] = requests;
   assert.equal(request.messages[2].content, "old result");
   assert.equal(request.messages[3].content, ADJUSTMENTS.easier);
-  assert.match(request.messages[0].content, /внутреннюю проверку/);
+  assert.match(request.messages[0].content, /Работай в два внутренних этапа/);
   assert.match(request.messages[1].content, /subordinate clauses/);
 });
 
@@ -66,6 +66,10 @@ test("local validators reject bad keys and unsupported formatting", () => {
 
 test("option normalizers put choices on separate lines", () => {
   assert.equal(normalizeOptionLineBreaks("Question. A) one B) two C) three D) four"), "Question.\nA) one\nB) two\nC) three\nD) four");
+  assert.equal(
+    normalizeOptionLineBreaks("Question. \u0410) one \u0411) two \u0412) three \u0413) four"),
+    "Question.\nA) one\nB) two\nC) three\nD) four",
+  );
   assert.match(normalizeTestOptionLineBreaks("1. Question\nA. One B. Two C. Three D. Four"), /A\. One\nB\. Two\nC\. Three\nD\. Four/);
 });
 
