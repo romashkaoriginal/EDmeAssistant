@@ -334,9 +334,13 @@ function parseTestAnswers(text) {
 
 function normalizeOptionLineBreaks(text) {
   return String(text ?? "")
-    // Option labels may use either a period or a parenthesis. Keep every
-    // answer on its own line in all generation modes, including freeform.
-    .replace(/([^\n])(?:[ \t]+)([A-D])([.)])\s+(?=\S)/g, "$1\n$2$3 ");
+    // Models frequently use Russian-looking option labels (А/В/С/Д), which
+    // are different Unicode characters from A/B/C/D. Normalize both spelling
+    // sets and keep every answer on its own line in every generation mode.
+    .replace(/([^\n])(?:[ \t]+)([A-DАВСД])([.)])\s+(?=\S)/g, (_, prefix, label, suffix) => {
+      const latinLabel = { "А": "A", "В": "B", "С": "C", "Д": "D" }[label] || label;
+      return `${prefix}\n${latinLabel}${suffix} `;
+    });
 }
 
 function normalizeTestOptionLineBreaks(text) {

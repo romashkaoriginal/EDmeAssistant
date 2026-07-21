@@ -232,6 +232,13 @@ test("shared option normalizer handles parentheses for freeform answers", () => 
   );
 });
 
+test("option normalizer splits and latinizes Cyrillic answer labels", () => {
+  assert.equal(
+    normalizeOptionLineBreaks("1. Выберите. А. первый В. второй С. третий Д. четвёртый"),
+    "1. Выберите.\nA. первый\nB. второй\nC. третий\nD. четвёртый",
+  );
+});
+
 test("validation rejects references to missing visuals", () => {
   const invalid = validFractionTest().replace("Calculate $\\frac{2}{3} \\cdot \\frac{5}{7}$.", "На каком рисунке изображён график функции?");
   const issues = require("../src/generator").richMarkdownIssues({ text: invalid, type: "test", student, topic: "Графики" });

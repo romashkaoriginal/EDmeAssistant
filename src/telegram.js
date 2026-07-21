@@ -230,7 +230,14 @@ function splitChunks(text, size = MESSAGE_CHUNK_SIZE) {
 }
 
 async function sendRichMarkdown(bot, chatId, text, options = undefined) {
-  const chunks = splitChunks(normalizeRichMarkdown(text));
+  // This is the final formatting boundary before Telegram. Do not rely only on
+  // the generator: old saved results, regenerated text and Cyrillic А/В/С/Д
+  // labels can otherwise reach the client as one dense line.
+  const normalizedOptions = String(text ?? "").replace(/([^\n])(?:[ \t]+)([A-DАВСД])([.)])\s+(?=\S)/g, (_, prefix, label, suffix) => {
+    const latinLabel = { "А": "A", "В": "B", "С": "C", "Д": "D" }[label] || label;
+    return `${prefix}\n${latinLabel}${suffix} `;
+  });
+  const chunks = splitChunks(normalizeRichMarkdown(normalizedOptions));
   const sendChunk = async (chunk, chunkOptions) => {
     if (typeof bot.sendRichMessage !== "function") {
       return bot.sendMessage(chatId, richMarkdownToPlainText(chunk), chunkOptions);

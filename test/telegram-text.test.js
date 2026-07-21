@@ -68,6 +68,18 @@ test("sendRichMarkdown sends normalized LaTeX through Telegram rich messages and
  $\frac{3}{4} + \frac{1}{8}$` }, { reply_markup: keyboard }]]);
 });
 
+test("sendRichMarkdown puts Cyrillic-labelled options on separate lines", async () => {
+  const calls = [];
+  const bot = {
+    sendRichMessage: async (...args) => calls.push(args),
+  };
+
+  await sendRichMarkdown(bot, 42, "1. Выберите. А. один В. два С. три Д. четыре");
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][1].markdown, "1. Выберите.\nA. один\nB. два\nC. три\nD. четыре");
+});
+
 test("sendRichMarkdown falls back to readable plain text when Telegram rejects markup", async () => {
   const calls = [];
   const bot = {
