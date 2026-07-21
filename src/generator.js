@@ -452,6 +452,19 @@ function normalizeFreeformLatex(value) {
     .trim();
 }
 
+function usableMaterialFallback(value, { type, topic }) {
+  const material = String(value ?? "").trim();
+  // A failed verifier must not discard a complete homework/task set solely
+  // because it missed a formatting detail. Tests remain strict: a malformed
+  // answer key may change the meaning of the assessment.
+  if (type === "test" || material.length < 160) return null;
+  if (MISSING_VISUAL_PATTERN.test(material) || PROCESS_NOTE_PATTERN.test(material)) return null;
+
+  if (/^#\s+\S/m.test(material)) return material;
+  const title = type === "homework" ? "Домашнее задание" : "Задания";
+  return `# ${title}${topic ? `: ${topic}` : ""}\n\n${material}`;
+}
+
 function richMarkdownIssues({ text, type, student, topic }) {
   const issues = [];
   const value = String(text || "");
@@ -594,14 +607,21 @@ class ContentGenerator {
         if (type === "test") result = normalizeTestOptionLineBreaks(result);
         issues = validate(result);
       } catch (error) {
-        if (!initialIssues.length) {
-          console.warn("AI verifier failed; returning the valid first-pass material", {
+        const fallback = !initialIssues.length ? initialResult : usableMaterialFallback(initialResult, { type, topic });
+        if (fallback) {
+          console.warn("AI verifier failed; returning first-pass material", {
             code: error.code,
             model: error.aiModel || this.verifierModel,
             message: error.message,
+            initialIssues,
           });
-          result = initialResult;
-          issues = initialIssues;
+          result = fallback;
+          issues = validate(result);
+          // A non-test draft can still be useful when only automatic format
+          // checks failed. Telegram has its own Rich Markdown/plain-text
+          // fallback on delivery, so do not turn this provider outage into a
+          // user-facing generation failure.
+          if (initialIssues.length) return { result };
         } else {
           throw error;
         }

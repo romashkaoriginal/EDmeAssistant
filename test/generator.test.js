@@ -349,6 +349,27 @@ test("a valid first pass is returned when the verifier responds with an empty bo
   assert.equal(requests.length, 2);
 });
 
+test("a usable homework draft is returned when verifier is empty despite formatting issues", async () => {
+  const material = "Свойства квадратичной функции:\n\n1. Ветви параболы направлены вверх при $a > 0$ и вниз при $a < 0$.\n\n2. Ось симметрии: $x = -\\frac{b}{2a}$.\n\n3. Найдите вершину параболы и определите промежутки возрастания и убывания функции.";
+  const { generator, requests } = mockedGenerator([material, ""]);
+
+  const { result } = await generator.generate({ type: "homework", student, card, topic: "Свойства квадратичной функции" });
+
+  assert.match(result, /^# Домашнее задание: Свойства квадратичной функции/m);
+  assert.match(result, /Ось симметрии/);
+  assert.equal(requests.length, 2);
+});
+
+test("a malformed test is still rejected when verifier is empty", async () => {
+  const invalid = validFractionTest().replace("B. $\\frac{10}{21}$", "B. $\\frac{2}{3}$");
+  const { generator } = mockedGenerator([invalid, ""]);
+
+  await assert.rejects(
+    () => generator.generate({ type: "test", student, card, topic: "Дроби" }),
+    (error) => error.code === "AI_EMPTY_RESPONSE",
+  );
+});
+
 test("solutions receive the verifier pass", async () => {
   const { generator, requests } = mockedGenerator(["# Решения\n\n$2 + 2 = 4$", "# Решения\n\n$2 + 2 = 4$"]);
   generator.verifierModel = "deepseek/deepseek-v4-pro";
