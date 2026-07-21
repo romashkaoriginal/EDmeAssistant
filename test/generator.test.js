@@ -49,6 +49,16 @@ test("each user action sends exactly one request without a client timeout", asyn
   }
 });
 
+test("invalid generated material receives one same-model repair attempt", async () => {
+  const broken = "# Test\n\n1. Incomplete question\nA. One";
+  const { generator, requests } = mockedGenerator([broken, validTest()]);
+  const { result } = await generator.generate({ type: "test", student, card, topic: "topic" });
+  assert.equal(result, validTest());
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].model, requests[0].model);
+  assert.match(requests[1].messages.at(-1).content, /Ответы для репетитора/);
+});
+
 test("Gemini Flash receives a bounded thinking budget in the same request", async () => {
   const { generator, requests } = mockedGenerator("Brief answer.");
   generator.model = "google/gemini-2.5-flash";

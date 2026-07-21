@@ -780,9 +780,24 @@ class ContentGenerator {
     let issues = validate(result);
     const initialResult = result;
     const initialIssues = issues;
-    // One request per user action. Prompt-level self-checking and local
-    // deterministic validators remain; a second model call is intentionally
-    // not used as it triples latency and often fails independently.
+    // The normal path stays single-request. Only a locally detected invalid
+    // response gets one same-model repair attempt, so users never receive
+    // malformed formulas or an incomplete answer key.
+    if (issues.length) {
+      const correction = type === "test"
+        ? "Перепиши предыдущий тест полностью. Верни только готовый тест, без отчёта. Обязательно используй заголовок «## Ответы для репетитора», ровно четыре варианта A, B, C и D на отдельных строках в каждом вопросе, полный ключ и корректный Telegram LaTeX: каждая команда LaTeX должна находиться внутри $...$ или $$...$$, а разделители должны быть парными."
+        : "Перепиши предыдущий материал полностью. Верни только готовый материал без отчёта. Исправь все нарушения Telegram Markdown и LaTeX: каждая команда LaTeX должна находиться внутри $...$ или $$...$$, а разделители должны быть парными.";
+      result = await this.complete([
+        ...messages,
+        { role: "assistant", content: initialResult },
+        { role: "user", content: `${correction}\nАвтоматическая проверка обнаружила: ${issues.join("; ")}` },
+      ], { reasoningEffort: "high" });
+      if (type === "test") result = normalizeTestOptionLineBreaks(result);
+      issues = validate(result);
+    }
+
+    // The legacy audit path is intentionally disabled: it used a separate
+    // verifier contract and was replaced by the narrow repair attempt above.
     const needsSecondPass = false;
     if (needsSecondPass && MAX_GENERATION_ATTEMPTS > 1) {
       const correction = type === "test"
