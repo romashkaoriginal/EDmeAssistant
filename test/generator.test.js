@@ -369,6 +369,17 @@ test("a usable homework draft is returned when verifier is empty despite formatt
   assert.equal(requests.length, 2);
 });
 
+test("a readable homework result is returned when both passes have only format issues", async () => {
+  const material = "Свойства функции.\n\n1. Найдите вершину параболы y = x^2 - 4x + 3.\n\n2. Укажите ось симметрии.\n\n3. Определите промежутки возрастания и убывания.\n\n4. Найдите нули функции и область значений.";
+  const { generator, requests } = mockedGenerator([material, material]);
+
+  const { result } = await generator.generate({ type: "homework", student, card, topic: "Свойства функции" });
+
+  assert.match(result, /^# Домашнее задание: Свойства функции/m);
+  assert.match(result, /промежутки возрастания/);
+  assert.equal(requests.length, 2);
+});
+
 test("a malformed test is still rejected when verifier is empty", async () => {
   const invalid = validFractionTest().replace("B. $\\frac{10}{21}$", "B. $\\frac{2}{3}$");
   const { generator } = mockedGenerator([invalid, ""]);

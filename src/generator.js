@@ -676,6 +676,12 @@ class ContentGenerator {
       }
     }
     if (issues.length) {
+      const fallback = usableMaterialFallback(result, { type, topic })
+        || usableMaterialFallback(initialResult, { type, topic });
+      if (fallback) {
+        console.warn("AI material has format issues; returning readable non-test material", { issues });
+        return { result: fallback };
+      }
       const error = new Error(`AI generation validation failed after ${MAX_GENERATION_ATTEMPTS} attempts: ${issues.join("; ")}`);
       error.code = "AI_GENERATION_VALIDATION_FAILED";
       throw error;
