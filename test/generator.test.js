@@ -458,7 +458,8 @@ test("freeform answers with a methodist system prompt", async () => {
   assert.match(request.messages[0].content, /методист/);
   assert.match(request.messages[0].content, /между \$\.\.\.\$/);
   assert.equal(request.messages[1].content, "Как объяснить дроби пятикласснику?");
-  assert.equal(requests.length, 1);
+  assert.equal(requests.length, 2);
+  assert.match(requests[1].messages.at(-1).content, /независимую строгую проверку предыдущего ответа/);
 });
 
 test("freeform preserves Markdown math wrappers and normalizes LaTeX", async () => {
@@ -476,6 +477,15 @@ $\frac{2}{5} \div \frac{4}{10} = 1$
 
 Допустимо, только если $c \neq 0$.`);
   assert.equal(normalizeFreeformLatex(String.raw`$$ \frac{3}{4} $$`), String.raw`$$\frac{3}{4}$$`);
+});
+
+test("freeform returns the first pass when its verifier is empty", async () => {
+  const { generator, requests } = mockedGenerator(["Краткий ответ для репетитора.", ""]);
+
+  const { result } = await generator.freeform({ question: "Как объяснить тему?" });
+
+  assert.equal(result, "Краткий ответ для репетитора.");
+  assert.equal(requests.length, 2);
 });
 
 test("freeform system prompt instructs the model to refuse off-topic questions", async () => {
