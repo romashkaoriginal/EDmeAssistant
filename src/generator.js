@@ -155,36 +155,55 @@ const MAX_GENERATION_ATTEMPTS = 2;
 const TEST_OPTION_LABELS = ["A", "B", "C", "D"];
 const DEEPSEEK_V4_PRO_MODEL = "deepseek/deepseek-v4-pro";
 const TEST_GENERATION_INSTRUCTIONS = `Для каждого вопроса создай ровно четыре разных варианта ответа с метками A, B, C и D. Каждый вариант начинай с новой отдельной строки в формате «A. текст варианта»; никогда не размещай два варианта на одной строке. В разделе ответов для репетитора укажи для каждого вопроса его номер и одну метку правильного варианта. Перед возвратом теста самостоятельно пересчитай числовые ответы и проверь соответствие выбранного варианта пояснению. Не создавай вопросы вида «на каком рисунке», «что изображено на рисунке/графике» и любые другие вопросы, для ответа на которые нужен отсутствующий визуальный материал. Свойства графиков проверяй по заданной формуле, координатам или полному текстовому описанию. Верни только готовый тест без отчёта о проверке и исправлениях.`;
-const TEST_AUDIT_INSTRUCTIONS = `Проведи независимую строгую проверку предыдущего теста и верни полный исправленный тест без отчёта о проверке.
+const AUDIT_RESULT_CONTRACT = `Работай как независимый эксперт, а не как редактор, который предполагает, что предыдущий вариант верен. Для каждого проверяемого утверждения, задания, ответа, ключа и объяснения сначала самостоятельно получи или обоснуй результат, затем сопоставь его с материалом. Если результат нельзя надёжно подтвердить по условию, перепиши или удали этот фрагмент. Не ограничивайся поверхностной проверкой формата.
+
+Верни СТРОГО один JSON-объект без Markdown, без обратных кавычек и без текста до или после него:
+{"verdict":"pass"|"rewrite","issues":["краткое проверяемое основание"],"material":"полный готовый материал для пользователя"}
+
+Значение material обязательно всегда: при verdict "pass" это полный проверенный материал без служебных заметок; при verdict "rewrite" — полный исправленный материал. verdict "pass" допускается только при пустом массиве issues. Не помещай в material отчёт о проверке, JSON или служебные комментарии.`;
+const AUDIT_JSON_SCHEMA = {
+  name: "independent_material_audit",
+  strict: true,
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      verdict: { type: "string", enum: ["pass", "rewrite"] },
+      issues: { type: "array", items: { type: "string" } },
+      material: { type: "string" },
+    },
+    required: ["verdict", "issues", "material"],
+  },
+};
+
+const TEST_AUDIT_INSTRUCTIONS = `Проведи независимую строгую проверку предыдущего теста.
 - Реши каждый вопрос заново, не доверяя указанному ключу и пояснению.
-- Для дробно-рациональных уравнений отдельно найди ОДЗ, реши уравнение и подставь каждый корень в исходное уравнение.
 - Проверь, что правильный вариант ровно один; равносильные варианты считаются повтором и должны быть заменены.
 - Проверь вопрос до выбора ключа: смысл, правило и контекст должны допускать ровно один вариант. Не используй формулировки, где ответ зависит от неуказанного контекста, интонации или трактовки; замени такой вопрос полностью.
 - Проверь, что варианты A, B, C и D каждого вопроса расположены на четырёх отдельных строках; два варианта не могут быть в одной строке.
 - Проверь соответствие метки ответа, текста выбранного варианта и пояснения. Если пояснение приводит к другому варианту, исправь метку или варианты.
 - Удали вопросы с неверной предпосылкой, отсутствующим правильным вариантом или неоднозначным условием и замени их корректными по той же теме.
 - Исправь орфографию, пунктуацию, грамматику и согласование слов во всех вопросах, вариантах и пояснениях. Формулировки должны звучать естественно по-русски.
-- Молча проверь парность $...$ и $$...$$, нумерацию и раздел ответов. Верни только готовый материал для репетитора.`;
+- Молча проверь парность $...$ и $$...$$, нумерацию и раздел ответов.`;
 
 const MATERIAL_GENERATION_INSTRUCTIONS = `Для домашнего задания и набора задач используй открытые задания без готовых вариантов ответа. У каждого задания должен быть один проверяемый результат или явно указанное множество результатов; не создавай условия, где несколько разных ответов могут одновременно подходить без явного указания этого. Не добавляй задания, которые проверяют постороннюю тему лишь потому, что она использует похожий приём.`;
 
-const MATERIAL_AUDIT_INSTRUCTIONS = `Проведи независимую строгую проверку предыдущего учебного материала и верни его полный исправленный вариант без отчёта о проверке.
+const MATERIAL_AUDIT_INSTRUCTIONS = `Проведи независимую строгую проверку предыдущего учебного материала.
 - Проверь точность фактов, соответствие теме, указанному классу и школьной программе.
 - Проверь каждое задание отдельно: оно должно проверять только знания, необходимые для указанной темы. Удали или замени задания из смежных тем, если они не требуются для её изучения.
 - Проверь орфографию, пунктуацию, грамматику, согласование слов и естественность формулировок на русском языке.
-- Реши заново все математические задания и примеры. Для уравнений и неравенств с ограничениями отдельно найди ОДЗ, проверь все полученные корни подстановкой в исходное условие и исправь ошибки.
+- Реши заново все задания и примеры, для которых можно получить объективный результат; сверяй каждый результат, ответ и пояснение с самостоятельной проверкой.
 - Проверь, что условия однозначны, данных достаточно для решения, а ответы и пояснения не противоречат друг другу. Если в задании предложены варианты, явно укажи, сколько вариантов верны, либо замени его на открытое задание.
 - Проверь корректность LaTeX, нумерации, Markdown и отсутствие ссылок на несуществующие изображения, графики или таблицы. Каждая LaTeX-команда должна находиться внутри $...$ или $$...$$.
-- Не добавляй служебные заметки о проверке или исправлениях. Верни только готовый материал для репетитора.`;
+- Не добавляй служебные заметки о проверке или исправлениях в итоговый материал.`;
 
-const FREEFORM_AUDIT_INSTRUCTIONS = `Проведи независимую строгую проверку предыдущего ответа на свободный запрос и верни полный исправленный ответ без отчёта о проверке.
+const FREEFORM_AUDIT_INSTRUCTIONS = `Проведи независимую строгую проверку предыдущего ответа на свободный запрос.
 - Проверь фактическую точность, вычисления, логику, орфографию, пунктуацию и естественность русского языка.
 - Если ответ содержит тест или задания с вариантами, проверь каждое условие и ключ: в каждом вопросе должен быть ровно один правильный вариант, а ключ и пояснение должны быть полными и соответствовать вопросу.
 - Если хоть один вариант можно обоснованно трактовать по-разному или подходит вместе с ключом, перепиши весь вопрос и варианты так, чтобы ответ был единственным без дополнительных допущений.
 - Не используй Markdown-таблицы: в Telegram они могут разрываться между сообщениями. Оформляй ключ нумерованным списком.
 - Проверь, что формулы оформлены для Telegram Rich Markdown и что LaTeX-команды находятся внутри $...$ или $$...$$.
-- Сохрани корректный отказ, если исходный запрос не относится к образовательным темам.
-- Верни только готовый ответ пользователю.`;
+- Сохрани корректный отказ, если исходный запрос не относится к образовательным темам.`;
 
 const MISSING_VISUAL_PATTERN = /(?:на|по)\s+(?:каком\s+)?(?:рисунк[а-яё]*|изображени[а-яё]*|чертеж[а-яё]*|схем[а-яё]*|диаграмм[а-яё]*|таблиц[а-яё]*)|(?:рисун(?:ок|ке|ка)|изображение|черт[её]ж|схема|диаграмма)\s+(?:ниже|выше|слева|справа|под\s+номером|№)|(?:изображ[её]нн[а-яё]*|представленн[а-яё]*|показанн[а-яё]*)\s+(?:на|выше|ниже)/iu;
 const PROCESS_NOTE_PATTERN = /(?:^|\n)\s*(?:(?:исправлен|устран[её]н|проверен|учт[её]н)[а-яё]*\s+(?:ошиб|повтор|недоч[её]т|замечан|правк|пробел|требован)[а-яё]*|(?:что\s+исправлено|служебн[а-яё]+\s+(?:комментарий|примечание)|отч[её]т\s+о\s+проверке)\s*:)/imu;
@@ -352,6 +371,34 @@ function normalizeTestOptionLineBreaks(text) {
   // Models occasionally put A–D after each other in one line. Telegram then
   // renders a dense, unreadable test even though the content is otherwise valid.
   return `${normalizeOptionLineBreaks(questions)}${answers}`;
+}
+
+function parseAuditResult(text) {
+  const source = String(text ?? "").trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "");
+  let parsed;
+  try {
+    parsed = JSON.parse(source);
+  } catch {
+    const error = new Error("AI verifier returned an invalid audit contract");
+    error.code = "AI_AUDIT_FORMAT_INVALID";
+    throw error;
+  }
+
+  const verdict = parsed?.verdict;
+  const issues = parsed?.issues;
+  const material = parsed?.material;
+  if (!parsed || typeof parsed !== "object"
+    || !["pass", "rewrite"].includes(verdict)
+    || !Array.isArray(issues) || issues.some((issue) => typeof issue !== "string")
+    || typeof material !== "string" || !material.trim()
+    || (verdict === "pass" && issues.length)) {
+    const error = new Error("AI verifier returned an incomplete audit contract");
+    error.code = "AI_AUDIT_FORMAT_INVALID";
+    throw error;
+  }
+  return { verdict, issues: issues.map((issue) => issue.trim()).filter(Boolean), material: material.trim() };
 }
 
 function testQualityIssues(text, { targetQuestionCount = null } = {}) {
@@ -574,7 +621,7 @@ class ContentGenerator {
     return this.provider === "openrouter" && model === DEEPSEEK_V4_PRO_MODEL;
   }
 
-  async complete(messages, { model = this.model, reasoningEffort = null, timeoutMs = null } = {}) {
+  async complete(messages, { model = this.model, reasoningEffort = null, timeoutMs = null, responseFormat = null } = {}) {
     let text;
     let responseDiagnostics;
     if (this.provider === "openrouter") {
@@ -595,6 +642,7 @@ class ContentGenerator {
             exclude: true,
           },
         }),
+        ...(responseFormat && { response_format: { type: "json_schema", json_schema: responseFormat } }),
       }, timeoutMs ? { timeout: timeoutMs } : undefined);
       const choice = response.choices[0];
       const message = choice?.message || {};
@@ -620,6 +668,7 @@ class ContentGenerator {
         max_output_tokens: MAX_OUTPUT_TOKENS,
         instructions: messages[0].content,
         input: messages.slice(1).map((item) => `${item.role === "user" ? "" : "Предыдущий вариант:\n"}${item.content}`).join("\n\n"),
+        ...(responseFormat && { text: { format: { type: "json_schema", ...responseFormat } } }),
       });
       text = response.output_text;
       responseDiagnostics = {
@@ -644,6 +693,11 @@ class ContentGenerator {
       throw error;
     }
     return text.trim();
+  }
+
+  async audit(messages, options) {
+    const response = await this.complete(messages, { ...options, responseFormat: AUDIT_JSON_SCHEMA });
+    return parseAuditResult(response);
   }
 
   async generate({ type, student, card, topic, adjustment = null, previousResult = null, customInstruction = null, onProgress = null }) {
@@ -674,11 +728,15 @@ class ContentGenerator {
         : `${MATERIAL_AUDIT_INSTRUCTIONS}${issues.length ? `\nАвтоматическая проверка также обнаружила: ${issues.join("; ")}.` : ""}`;
       if (onProgress) await onProgress({ stage: "auditing" });
       try {
-        result = await this.complete([
+        const audit = await this.audit([
           ...messages,
           { role: "assistant", content: result },
-          { role: "user", content: correction },
+          { role: "user", content: `${correction}\n\n${AUDIT_RESULT_CONTRACT}` },
         ], { model: this.verifierModel, reasoningEffort: type === "test" ? "xhigh" : "high", timeoutMs: AUDIT_TIMEOUT_MS });
+        if (audit.verdict === "rewrite") {
+          console.warn("AI verifier rewrote material", { issueCount: audit.issues.length, type });
+        }
+        result = audit.material;
         if (type === "test") result = normalizeTestOptionLineBreaks(result);
         issues = validate(result);
       } catch (error) {
@@ -744,12 +802,15 @@ class ContentGenerator {
     ];
     const draft = await this.complete(messages, { reasoningEffort: "high" });
     try {
-      const result = await this.complete([
+      const audit = await this.audit([
         ...messages,
         { role: "assistant", content: draft },
-        { role: "user", content: MATERIAL_AUDIT_INSTRUCTIONS },
+        { role: "user", content: `${MATERIAL_AUDIT_INSTRUCTIONS}\n\n${AUDIT_RESULT_CONTRACT}` },
       ], { model: this.verifierModel, reasoningEffort: "high", timeoutMs: AUDIT_TIMEOUT_MS });
-      return { result: normalizeOptionLineBreaks(result) };
+      if (audit.verdict === "rewrite") {
+        console.warn("AI verifier rewrote solutions", { issueCount: audit.issues.length });
+      }
+      return { result: normalizeOptionLineBreaks(audit.material) };
     } catch (error) {
       console.warn("AI verifier failed for solutions; returning the first-pass material", {
         code: error.code,
@@ -778,12 +839,15 @@ class ContentGenerator {
     const messages = [{ role: "system", content: instructions }, { role: "user", content: question }];
     const draft = await this.complete(messages, { reasoningEffort: "high" });
     try {
-      const result = await this.complete([
+      const audit = await this.audit([
         ...messages,
         { role: "assistant", content: draft },
-        { role: "user", content: FREEFORM_AUDIT_INSTRUCTIONS },
+        { role: "user", content: `${FREEFORM_AUDIT_INSTRUCTIONS}\n\n${AUDIT_RESULT_CONTRACT}` },
       ], { model: this.verifierModel, reasoningEffort: "high", timeoutMs: AUDIT_TIMEOUT_MS });
-      return { result: normalizeOptionLineBreaks(normalizeFreeformLatex(result)) };
+      if (audit.verdict === "rewrite") {
+        console.warn("AI verifier rewrote freeform answer", { issueCount: audit.issues.length });
+      }
+      return { result: normalizeOptionLineBreaks(normalizeFreeformLatex(audit.material)) };
     } catch (error) {
       console.warn("AI verifier failed for freeform; returning the first-pass answer", {
         code: error.code,
@@ -798,6 +862,7 @@ class ContentGenerator {
 module.exports = {
   ContentGenerator, GENERATION_TYPES, ADJUSTMENTS, studentVersion, richMarkdownIssues,
   ANSWERS_MARKER, RICH_MARKDOWN_INSTRUCTIONS, FREEFORM_RICH_MARKDOWN_INSTRUCTIONS,
-  QUALITY_INSTRUCTIONS, FREEFORM_AUDIT_INSTRUCTIONS, testQualityIssues, normalizeFreeformLatex, normalizeOptionLineBreaks, normalizeTestOptionLineBreaks,
+  QUALITY_INSTRUCTIONS, FREEFORM_AUDIT_INSTRUCTIONS, AUDIT_RESULT_CONTRACT, parseAuditResult,
+  testQualityIssues, normalizeFreeformLatex, normalizeOptionLineBreaks, normalizeTestOptionLineBreaks,
   isBelarusianSubject, languageInstruction, MIN_TARGET_QUESTION_COUNT, MAX_TARGET_QUESTION_COUNT,
 };

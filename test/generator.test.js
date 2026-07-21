@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { ContentGenerator, GENERATION_TYPES, ADJUSTMENTS, studentVersion, ANSWERS_MARKER, testQualityIssues, normalizeFreeformLatex, normalizeOptionLineBreaks, normalizeTestOptionLineBreaks } = require("../src/generator");
+const { ContentGenerator, GENERATION_TYPES, ADJUSTMENTS, studentVersion, ANSWERS_MARKER, testQualityIssues, normalizeFreeformLatex, normalizeOptionLineBreaks, normalizeTestOptionLineBreaks, parseAuditResult } = require("../src/generator");
 
 const student = { full_name: "Иван Петров", subject: "Математика", grade: 8 };
 const card = {
@@ -20,8 +20,14 @@ function mockedGenerator(reply) {
       completions: {
         create: async (payload, options) => {
           const replyIndex = Math.min(requests.length, replies.length - 1);
+          let content = replies[replyIndex];
+          // The first request generates material. Every later request is an
+          // audit and must use the structured audit contract.
+          if (requests.length > 0 && typeof content === "string" && content.trim() && !content.trim().startsWith("{")) {
+            content = JSON.stringify({ verdict: "pass", issues: [], material: content });
+          }
           requests.push({ ...payload, requestOptions: options });
-          return { choices: [{ message: { content: replies[replyIndex] } }] };
+          return { choices: [{ message: { content } }] };
         },
       },
     },
@@ -232,6 +238,33 @@ test("shared option normalizer handles parentheses for freeform answers", () => 
   );
 });
 
+test("audit contract requires a full material payload and a consistent verdict", () => {
+  assert.deepEqual(
+    parseAuditResult('{"verdict":"rewrite","issues":["ключ не совпадает с решением"],"material":"# Исправленный материал"}'),
+    { verdict: "rewrite", issues: ["ключ не совпадает с решением"], material: "# Исправленный материал" },
+  );
+  assert.throws(
+    () => parseAuditResult('{"verdict":"pass","issues":["есть ошибка"],"material":"# Материал"}'),
+    (error) => error.code === "AI_AUDIT_FORMAT_INVALID",
+  );
+});
+
+test("audit rewrite replaces the generated material with its complete corrected version", async () => {
+  const draft = "# Материал\n\nНеверное утверждение: $2 + 2 = 5$.";
+  const corrected = "# Материал\n\nИсправленное утверждение: $2 + 2 = 4$.";
+  const audit = JSON.stringify({ verdict: "rewrite", issues: ["исправлена фактическая ошибка"], material: corrected });
+  const { generator, requests } = mockedGenerator([draft, audit]);
+
+  const { result } = await generator.generate({ type: "homework", student, card, topic: "Тема" });
+
+  assert.equal(result, corrected);
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].response_format.type, "json_schema");
+  assert.equal(requests[1].response_format.json_schema.strict, true);
+  assert.match(requests[1].messages.at(-1).content, /"verdict":"pass"\|"rewrite"/);
+  assert.match(requests[1].messages.at(-1).content, /самостоятельно получи или обоснуй результат/);
+});
+
 test("option normalizer splits and latinizes Cyrillic answer labels", () => {
   assert.equal(
     normalizeOptionLineBreaks("1. Выберите. А. первый В. второй С. третий Д. четвёртый"),
@@ -330,7 +363,7 @@ test("homework and task sets receive a mandatory second pass from the verifier m
     assert.equal(requests.length, 2);
     assert.equal(requests[1].model, "deepseek/deepseek-v4-pro");
     assert.match(requests[1].messages.at(-1).content, /независимую строгую проверку предыдущего учебного материала/);
-    assert.match(requests[1].messages.at(-1).content, /отдельно найди ОДЗ/);
+    assert.match(requests[1].messages.at(-1).content, /самостоятельной проверкой/);
     assert.match(requests[0].messages[0].content, /открытые задания без готовых вариантов ответа/);
     assert.match(requests[1].messages.at(-1).content, /проверять только знания, необходимые для указанной темы/);
   }
