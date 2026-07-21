@@ -142,8 +142,11 @@ function extractTargetQuestionCount(instruction) {
 }
 
 const MAX_OUTPUT_TOKENS = 2500;
-const HIGH_REASONING_MAX_OUTPUT_TOKENS = 4000;
-const XHIGH_REASONING_MAX_OUTPUT_TOKENS = 6000;
+// DeepSeek counts reasoning and the final answer against this shared budget.
+// 4k was fully consumed by reasoning on ordinary homework, yielding an empty
+// `content` with finish_reason=length. Reserve enough room for the answer.
+const HIGH_REASONING_MAX_OUTPUT_TOKENS = 8000;
+const XHIGH_REASONING_MAX_OUTPUT_TOKENS = 10000;
 const AUDIT_TIMEOUT_MS = 60_000;
 const MAX_CUSTOM_INSTRUCTION_LENGTH = 500;
 const MAX_GENERATION_ATTEMPTS = 2;

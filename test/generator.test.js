@@ -332,8 +332,8 @@ test("DeepSeek uses high reasoning for homework generation and audit", async () 
 
   assert.deepEqual(requests[0].reasoning, { effort: "high" });
   assert.deepEqual(requests[1].reasoning, { effort: "high" });
-  assert.equal(requests[0].max_tokens, 4000);
-  assert.equal(requests[1].max_tokens, 4000);
+  assert.equal(requests[0].max_tokens, 8000);
+  assert.equal(requests[1].max_tokens, 8000);
 });
 
 test("test audit uses xhigh reasoning", async () => {
@@ -345,7 +345,7 @@ test("test audit uses xhigh reasoning", async () => {
 
   assert.deepEqual(requests[0].reasoning, { effort: "high" });
   assert.deepEqual(requests[1].reasoning, { effort: "xhigh" });
-  assert.equal(requests[1].max_tokens, 6000);
+  assert.equal(requests[1].max_tokens, 10000);
 });
 
 test("a valid first pass is returned when the verifier responds with an empty body", async () => {
