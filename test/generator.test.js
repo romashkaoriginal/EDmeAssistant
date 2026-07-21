@@ -22,6 +22,18 @@ function validTest() {
   return `# Test\n\n${questions}\n\n## ${ANSWERS_MARKER}\n${answers}`;
 }
 
+function validStructuredTest({ processNote = false } = {}) {
+  return JSON.stringify({
+    title: "Test",
+    questions: Array.from({ length: 8 }, (_, index) => ({
+      prompt: processNote && index === 0 ? "[Корректировка] Choose the correct answer." : "Choose the correct answer.",
+      options: { A: "First", B: "Second", C: "Third", D: "Fourth" },
+      correctAnswer: "A",
+      explanation: "explanation",
+    })),
+  });
+}
+
 function validFractionTest() {
   const question = "1. Calculate $\\frac{2}{3} \\cdot \\frac{5}{7}$.\nA. $\\frac{7}{10}$\nB. $\\frac{10}{21}$\nC. $\\frac{12}{35}$\nD. $1$";
   return `# Test: fractions\n\n${question}\n\n## ${ANSWERS_MARKER}\n1. B — $\\frac{10}{21}$`;
@@ -35,28 +47,29 @@ test("generator exposes all generation types", () => {
 
 test("each user action sends exactly one request without a client timeout", async () => {
   const material = "# Material\n\nWrite a short explanation.";
-  const { generator, requests } = mockedGenerator([material, validTest(), material, material, "Brief answer."]);
+  const { generator, requests } = mockedGenerator([material, validStructuredTest(), material, material, "Brief answer."]);
   await generator.generate({ type: "homework", student, card, topic: "topic" });
   await generator.generate({ type: "test", student, card, topic: "topic" });
   await generator.generate({ type: "tasks", student, card, topic: "topic" });
   await generator.solutions({ student, topic: "topic", previousResult: material });
   await generator.freeform({ question: "How should I explain this topic?" });
   assert.equal(requests.length, 5);
-  for (const request of requests) {
+  for (const [index, request] of requests.entries()) {
     assert.equal(request.model, "qwen/qwen3-32b");
     assert.equal(request.requestOptions, undefined);
-    assert.equal(request.response_format, undefined);
+    if (index === 1) assert.equal(request.response_format?.json_schema?.name, "generated_school_test");
+    else assert.equal(request.response_format, undefined);
   }
 });
 
 test("invalid generated material receives one same-model repair attempt", async () => {
-  const broken = "# Test\n\n1. Incomplete question\nA. One";
-  const { generator, requests } = mockedGenerator([broken, validTest()]);
+  const { generator, requests } = mockedGenerator([validStructuredTest({ processNote: true }), validStructuredTest()]);
   const { result } = await generator.generate({ type: "test", student, card, topic: "topic" });
   assert.equal(result, validTest());
   assert.equal(requests.length, 2);
   assert.equal(requests[1].model, requests[0].model);
-  assert.match(requests[1].messages.at(-1).content, /Ответы для репетитора/);
+  assert.equal(requests[1].response_format?.json_schema?.name, "generated_school_test");
+  assert.match(requests[1].messages.at(-1).content, /структурированной схеме/);
 });
 
 test("Gemini Flash receives a bounded thinking budget in the same request", async () => {
@@ -103,6 +116,7 @@ test("local validators reject bad keys and unsupported formatting", () => {
   const invalidKey = validFractionTest().replace("B. $\\frac{10}{21}$", "B. $\\frac{2}{3}$");
   assert.match(testQualityIssues(invalidKey).join("; "), /ключ/);
   assert.match(richMarkdownIssues({ text: "# Title\n\n$\\begin{array}x\\end{array}$", type: "homework", student, topic: "topic" }).join("; "), /LaTeX/);
+  assert.match(richMarkdownIssues({ text: "# Title\n\n[Корректировка] Давайте изменим условие.", type: "tasks", student, topic: "topic" }).join("; "), /служебный/);
 });
 
 test("option normalizers put choices on separate lines", () => {
