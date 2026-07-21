@@ -142,7 +142,7 @@ function extractTargetQuestionCount(instruction) {
   return count;
 }
 
-const MAX_OUTPUT_TOKENS = 2500;
+const MAX_OUTPUT_TOKENS = 6000;
 // DeepSeek counts reasoning and the final answer against this shared budget.
 // 4k was fully consumed by reasoning on ordinary homework, yielding an empty
 // `content` with finish_reason=length. Reserve enough room for the answer.
@@ -150,7 +150,6 @@ const HIGH_REASONING_MAX_OUTPUT_TOKENS = 8000;
 const XHIGH_REASONING_MAX_OUTPUT_TOKENS = 10000;
 const HIGH_REASONING_BUDGET_TOKENS = 4000;
 const XHIGH_REASONING_BUDGET_TOKENS = 6000;
-const GENERATION_TIMEOUT_MS = 90_000;
 const MAX_CUSTOM_INSTRUCTION_LENGTH = 500;
 const TEST_OPTION_LABELS = ["A", "B", "C", "D"];
 const DEEPSEEK_V4_PRO_MODEL = "deepseek/deepseek-v4-pro";
@@ -611,7 +610,7 @@ class ContentGenerator {
     return this.provider === "openrouter" && model === DEEPSEEK_V4_PRO_MODEL;
   }
 
-  async complete(messages, { model = this.model, reasoningEffort = null, timeoutMs = GENERATION_TIMEOUT_MS } = {}) {
+  async complete(messages, { model = this.model, reasoningEffort = null, timeoutMs = null } = {}) {
     let text;
     let responseDiagnostics;
     if (this.provider === "openrouter") {
@@ -878,7 +877,7 @@ class ContentGenerator {
       "При сомнении, относится ли вопрос к разрешённым темам, считай, что не относится, и откажи.",
       "Отвечай на вопросы репетитора по-русски, кратко и по делу.",
       FREEFORM_RICH_MARKDOWN_INSTRUCTIONS,
-      "Объём ответа — не более 2500 символов.",
+      "Подбирай объём по запросу. Если запрошены задания, тест или ключ с объяснениями, выдай материал полностью; не обрывай его ради искусственного ограничения длины.",
     ].join(" ");
     const messages = [{ role: "system", content: instructions }, { role: "user", content: question }];
     const draft = await this.complete(messages, { reasoningEffort: "high" });

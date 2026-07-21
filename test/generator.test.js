@@ -32,7 +32,7 @@ test("generator exposes all generation types", () => {
   assert.equal(typeof ADJUSTMENTS.easier, "string");
 });
 
-test("each user action sends exactly one request with a 90-second deadline", async () => {
+test("each user action sends exactly one request without a client timeout", async () => {
   const material = "# Material\n\nWrite a short explanation.";
   const { generator, requests } = mockedGenerator([material, validTest(), material, material, "Brief answer."]);
   await generator.generate({ type: "homework", student, card, topic: "topic" });
@@ -43,7 +43,7 @@ test("each user action sends exactly one request with a 90-second deadline", asy
   assert.equal(requests.length, 5);
   for (const request of requests) {
     assert.equal(request.model, "qwen/qwen3-32b");
-    assert.equal(request.requestOptions.timeout, 90_000);
+    assert.equal(request.requestOptions, undefined);
     assert.equal(request.response_format, undefined);
   }
 });
