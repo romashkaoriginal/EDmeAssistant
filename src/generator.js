@@ -19,7 +19,8 @@ const FREEFORM_RICH_MARKDOWN_INSTRUCTIONS = String.raw`Форматируй от
 Не ставь пробелы сразу после открывающего $ или перед закрывающим $. Не используй для формул обратные кавычки или блоки кода. Не экранируй LaTeX-команды двойным обратным слешем: правильно \neq, а не \\neq.
 ${LATEX_ENVIRONMENT_WARNING}`;
 
-const QUALITY_INSTRUCTIONS = `Перед выдачей результата молча проверь его:
+const QUALITY_INSTRUCTIONS = `Перед выдачей результата выполни внутреннюю проверку, но не показывай её пользователю. Независимо реши или разберись в каждом задании, затем сверь условие, ответ и пояснение. Если ответ нельзя однозначно подтвердить, замени фрагмент на проверяемый; не угадывай и не оставляй неоднозначные формулировки.
+Перед выдачей результата молча проверь его:
 - все задания строго относятся к теме пользователя;
 - все понятия, темы и термины строго входят в школьную программу указанного класса; не используй темы, формулы и термины старших классов или вузовского курса, даже если они связаны с темой;
 - условия однозначны и содержат все необходимые ограничения и области определения;
@@ -149,33 +150,11 @@ const HIGH_REASONING_MAX_OUTPUT_TOKENS = 8000;
 const XHIGH_REASONING_MAX_OUTPUT_TOKENS = 10000;
 const HIGH_REASONING_BUDGET_TOKENS = 4000;
 const XHIGH_REASONING_BUDGET_TOKENS = 6000;
-const AUDIT_TIMEOUT_MS = 60_000;
+const GENERATION_TIMEOUT_MS = 90_000;
 const MAX_CUSTOM_INSTRUCTION_LENGTH = 500;
-const MAX_GENERATION_ATTEMPTS = 2;
 const TEST_OPTION_LABELS = ["A", "B", "C", "D"];
 const DEEPSEEK_V4_PRO_MODEL = "deepseek/deepseek-v4-pro";
 const TEST_GENERATION_INSTRUCTIONS = `Для каждого вопроса создай ровно четыре разных варианта ответа с метками A, B, C и D. Каждый вариант начинай с новой отдельной строки в формате «A. текст варианта»; никогда не размещай два варианта на одной строке. В разделе ответов для репетитора укажи для каждого вопроса его номер и одну метку правильного варианта. Перед возвратом теста самостоятельно пересчитай числовые ответы и проверь соответствие выбранного варианта пояснению. Не создавай вопросы вида «на каком рисунке», «что изображено на рисунке/графике» и любые другие вопросы, для ответа на которые нужен отсутствующий визуальный материал. Свойства графиков проверяй по заданной формуле, координатам или полному текстовому описанию. Верни только готовый тест без отчёта о проверке и исправлениях.`;
-const AUDIT_RESULT_CONTRACT = `Работай как независимый эксперт, а не как редактор, который предполагает, что предыдущий вариант верен. Для каждого проверяемого утверждения, задания, ответа, ключа и объяснения сначала самостоятельно получи или обоснуй результат, затем сопоставь его с материалом. Если результат нельзя надёжно подтвердить по условию, перепиши или удали этот фрагмент. Не ограничивайся поверхностной проверкой формата.
-
-Верни СТРОГО один JSON-объект без Markdown, без обратных кавычек и без текста до или после него:
-{"verdict":"pass"|"rewrite","issues":["краткое проверяемое основание"],"material":"полный готовый материал для пользователя"}
-
-Значение material обязательно всегда: при verdict "pass" это полный проверенный материал без служебных заметок; при verdict "rewrite" — полный исправленный материал. verdict "pass" допускается только при пустом массиве issues. Не помещай в material отчёт о проверке, JSON или служебные комментарии.`;
-const AUDIT_JSON_SCHEMA = {
-  name: "independent_material_audit",
-  strict: true,
-  schema: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      verdict: { type: "string", enum: ["pass", "rewrite"] },
-      issues: { type: "array", items: { type: "string" } },
-      material: { type: "string" },
-    },
-    required: ["verdict", "issues", "material"],
-  },
-};
-
 const TEST_AUDIT_INSTRUCTIONS = `Проведи независимую строгую проверку предыдущего теста.
 - Реши каждый вопрос заново, не доверяя указанному ключу и пояснению.
 - Проверь, что правильный вариант ровно один; равносильные варианты считаются повтором и должны быть заменены.
@@ -389,18 +368,17 @@ function parseAuditResult(text) {
 
   const verdict = parsed?.verdict;
   const issues = parsed?.issues;
-  const material = parsed?.material;
   if (!parsed || typeof parsed !== "object"
     || !["pass", "rewrite"].includes(verdict)
     || !Array.isArray(issues) || issues.some((issue) => typeof issue !== "string")
-    || typeof material !== "string" || !material.trim()
-    || (verdict === "pass" && issues.length)) {
+    || (verdict === "pass" && issues.length)
+    || (verdict === "rewrite" && !issues.some((issue) => issue.trim()))) {
     const error = new Error("AI verifier returned an incomplete audit contract");
     error.code = "AI_AUDIT_FORMAT_INVALID";
     error.auditDiagnostic = auditContractDiagnostic(text, "invalid_shape");
     throw error;
   }
-  return { verdict, issues: issues.map((issue) => issue.trim()).filter(Boolean), material: material.trim() };
+  return { verdict, issues: issues.map((issue) => issue.trim()).filter(Boolean) };
 }
 
 function auditContractDiagnostic(text, reason) {
@@ -411,7 +389,6 @@ function auditContractDiagnostic(text, reason) {
     startsWithObject: source.startsWith("{"),
     hasVerdictField: /"verdict"\s*:/u.test(source),
     hasIssuesField: /"issues"\s*:/u.test(source),
-    hasMaterialField: /"material"\s*:/u.test(source),
   };
 }
 
@@ -582,11 +559,10 @@ function richMarkdownIssues({ text, type, student, topic }) {
 }
 
 class ContentGenerator {
-  constructor({ apiKey, model, verifierModel, provider = "openai" }) {
+  constructor({ apiKey, model, provider = "openai" }) {
     this.provider = provider;
     this.client = apiKey ? new OpenAI({ apiKey, ...(provider === "openrouter" && { baseURL: "https://openrouter.ai/api/v1" }) }) : null;
     this.model = model || (provider === "openrouter" ? DEEPSEEK_V4_PRO_MODEL : "gpt-5-mini");
-    this.verifierModel = verifierModel || this.model;
   }
 
   isConfigured() { return Boolean(this.client); }
@@ -635,7 +611,7 @@ class ContentGenerator {
     return this.provider === "openrouter" && model === DEEPSEEK_V4_PRO_MODEL;
   }
 
-  async complete(messages, { model = this.model, reasoningEffort = null, timeoutMs = null, responseFormat = null } = {}) {
+  async complete(messages, { model = this.model, reasoningEffort = null, timeoutMs = GENERATION_TIMEOUT_MS } = {}) {
     let text;
     let responseDiagnostics;
     if (this.provider === "openrouter") {
@@ -656,7 +632,6 @@ class ContentGenerator {
             exclude: true,
           },
         }),
-        ...(responseFormat && { response_format: { type: "json_schema", json_schema: responseFormat } }),
       }, timeoutMs ? { timeout: timeoutMs } : undefined);
       const choice = response.choices[0];
       const message = choice?.message || {};
@@ -682,8 +657,7 @@ class ContentGenerator {
         max_output_tokens: MAX_OUTPUT_TOKENS,
         instructions: messages[0].content,
         input: messages.slice(1).map((item) => `${item.role === "user" ? "" : "Предыдущий вариант:\n"}${item.content}`).join("\n\n"),
-        ...(responseFormat && { text: { format: { type: "json_schema", ...responseFormat } } }),
-      });
+      }, timeoutMs ? { timeout: timeoutMs } : undefined);
       text = response.output_text;
       responseDiagnostics = {
         provider: "openai",
@@ -709,6 +683,7 @@ class ContentGenerator {
     return text.trim();
   }
 
+  /* Removed: former multi-call audit and rewrite implementation.
   async audit(messages, options) {
     const requestOptions = { ...options, responseFormat: AUDIT_JSON_SCHEMA };
     const response = await this.complete(messages, requestOptions);
@@ -717,7 +692,7 @@ class ContentGenerator {
     } catch (error) {
       if (error.code !== "AI_AUDIT_FORMAT_INVALID") throw error;
       console.warn("AI verifier returned invalid audit contract; retrying once", {
-        model: options?.model || this.verifierModel,
+        model: options?.model || this.model,
         diagnostic: error.auditDiagnostic,
       });
       try {
@@ -740,6 +715,19 @@ class ContentGenerator {
     }
   }
 
+  async rewriteAfterAudit(messages, { draft, issues, model = this.model, reasoningEffort = "high", timeoutMs = AUDIT_TIMEOUT_MS }) {
+    const issueList = issues.map((issue, index) => `${index + 1}. ${issue}`).join("\n");
+    return this.complete([
+      ...messages,
+      { role: "assistant", content: draft },
+      {
+        role: "user",
+        content: `Перепиши предыдущий материал полностью с учётом независимой проверки:\n${issueList}\n\nВерни только готовый материал для пользователя. Не упоминай проверку, ошибки, JSON или служебные комментарии.`,
+      },
+    ], { model, reasoningEffort, timeoutMs });
+  }
+
+  */
   async generate({ type, student, card, topic, adjustment = null, previousResult = null, customInstruction = null, onProgress = null }) {
     if (!this.client) {
       const error = new Error("AI provider is not configured");
@@ -761,7 +749,10 @@ class ContentGenerator {
     let issues = validate(result);
     const initialResult = result;
     const initialIssues = issues;
-    const needsSecondPass = true;
+    // One request per user action. Prompt-level self-checking and local
+    // deterministic validators remain; a second model call is intentionally
+    // not used as it triples latency and often fails independently.
+    const needsSecondPass = false;
     if (needsSecondPass && MAX_GENERATION_ATTEMPTS > 1) {
       const correction = type === "test"
         ? `${TEST_AUDIT_INSTRUCTIONS}${targetQuestionCount ? `\nВ тесте должно остаться ровно ${targetQuestionCount} вопросов.` : ""}${issues.length ? `\nАвтоматическая проверка также обнаружила: ${issues.join("; ")}.` : ""}`
@@ -772,11 +763,17 @@ class ContentGenerator {
           ...messages,
           { role: "assistant", content: result },
           { role: "user", content: `${correction}\n\n${AUDIT_RESULT_CONTRACT}` },
-        ], { model: this.verifierModel, reasoningEffort: type === "test" ? "xhigh" : "high", timeoutMs: AUDIT_TIMEOUT_MS });
+        ], { model: this.model, reasoningEffort: type === "test" ? "xhigh" : "high", timeoutMs: AUDIT_TIMEOUT_MS });
         if (audit.verdict === "rewrite") {
           console.warn("AI verifier rewrote material", { issueCount: audit.issues.length, type });
+          result = await this.rewriteAfterAudit(messages, {
+            draft: result,
+            issues: audit.issues,
+            reasoningEffort: type === "test" ? "xhigh" : "high",
+          });
+        } else {
+          result = initialResult;
         }
-        result = audit.material;
         if (type === "test") result = normalizeTestOptionLineBreaks(result);
         issues = validate(result);
       } catch (error) {
@@ -784,7 +781,7 @@ class ContentGenerator {
         if (fallback) {
           console.warn("AI verifier failed; returning first-pass material", {
             code: error.code,
-            model: error.aiModel || this.verifierModel,
+            model: error.aiModel || this.model,
             message: error.message,
             initialIssues,
             auditDiagnostic: error.auditDiagnostic,
@@ -814,7 +811,7 @@ class ContentGenerator {
         console.warn("AI material has format issues; returning readable non-test material", { issues });
         return { result: normalizeOptionLineBreaks(fallback) };
       }
-      const error = new Error(`AI generation validation failed after ${MAX_GENERATION_ATTEMPTS} attempts: ${issues.join("; ")}`);
+      const error = new Error(`AI generation validation failed: ${issues.join("; ")}`);
       error.code = "AI_GENERATION_VALIDATION_FAILED";
       throw error;
     }
@@ -843,20 +840,23 @@ class ContentGenerator {
       { role: "user", content: "Дай решения, ответы и подсказки к этим заданиям." },
     ];
     const draft = await this.complete(messages, { reasoningEffort: "high" });
+    return { result: normalizeOptionLineBreaks(draft) };
     try {
       const audit = await this.audit([
         ...messages,
         { role: "assistant", content: draft },
         { role: "user", content: `${MATERIAL_AUDIT_INSTRUCTIONS}\n\n${AUDIT_RESULT_CONTRACT}` },
-      ], { model: this.verifierModel, reasoningEffort: "high", timeoutMs: AUDIT_TIMEOUT_MS });
+      ], { model: this.model, reasoningEffort: "high", timeoutMs: AUDIT_TIMEOUT_MS });
       if (audit.verdict === "rewrite") {
         console.warn("AI verifier rewrote solutions", { issueCount: audit.issues.length });
+        const result = await this.rewriteAfterAudit(messages, { draft, issues: audit.issues });
+        return { result: normalizeOptionLineBreaks(result) };
       }
-      return { result: normalizeOptionLineBreaks(audit.material) };
+      return { result: normalizeOptionLineBreaks(draft) };
     } catch (error) {
       console.warn("AI verifier failed for solutions; returning the first-pass material", {
         code: error.code,
-        model: error.aiModel || this.verifierModel,
+        model: error.aiModel || this.model,
         message: error.message,
         auditDiagnostic: error.auditDiagnostic,
         initialAuditDiagnostic: error.initialAuditDiagnostic,
@@ -882,20 +882,23 @@ class ContentGenerator {
     ].join(" ");
     const messages = [{ role: "system", content: instructions }, { role: "user", content: question }];
     const draft = await this.complete(messages, { reasoningEffort: "high" });
+    return { result: normalizeOptionLineBreaks(normalizeFreeformLatex(draft)) };
     try {
       const audit = await this.audit([
         ...messages,
         { role: "assistant", content: draft },
         { role: "user", content: `${FREEFORM_AUDIT_INSTRUCTIONS}\n\n${AUDIT_RESULT_CONTRACT}` },
-      ], { model: this.verifierModel, reasoningEffort: "high", timeoutMs: AUDIT_TIMEOUT_MS });
+      ], { model: this.model, reasoningEffort: "high", timeoutMs: AUDIT_TIMEOUT_MS });
       if (audit.verdict === "rewrite") {
         console.warn("AI verifier rewrote freeform answer", { issueCount: audit.issues.length });
+        const result = await this.rewriteAfterAudit(messages, { draft, issues: audit.issues });
+        return { result: normalizeOptionLineBreaks(normalizeFreeformLatex(result)) };
       }
-      return { result: normalizeOptionLineBreaks(normalizeFreeformLatex(audit.material)) };
+      return { result: normalizeOptionLineBreaks(normalizeFreeformLatex(draft)) };
     } catch (error) {
       console.warn("AI verifier failed for freeform; returning the first-pass answer", {
         code: error.code,
-        model: error.aiModel || this.verifierModel,
+        model: error.aiModel || this.model,
         message: error.message,
         auditDiagnostic: error.auditDiagnostic,
         initialAuditDiagnostic: error.initialAuditDiagnostic,
@@ -908,7 +911,7 @@ class ContentGenerator {
 module.exports = {
   ContentGenerator, GENERATION_TYPES, ADJUSTMENTS, studentVersion, richMarkdownIssues,
   ANSWERS_MARKER, RICH_MARKDOWN_INSTRUCTIONS, FREEFORM_RICH_MARKDOWN_INSTRUCTIONS,
-  QUALITY_INSTRUCTIONS, FREEFORM_AUDIT_INSTRUCTIONS, AUDIT_RESULT_CONTRACT, parseAuditResult,
+  QUALITY_INSTRUCTIONS,
   testQualityIssues, normalizeFreeformLatex, normalizeOptionLineBreaks, normalizeTestOptionLineBreaks,
   isBelarusianSubject, languageInstruction, MIN_TARGET_QUESTION_COUNT, MAX_TARGET_QUESTION_COUNT,
 };

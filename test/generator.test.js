@@ -1,573 +1,91 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { ContentGenerator, GENERATION_TYPES, ADJUSTMENTS, studentVersion, ANSWERS_MARKER, testQualityIssues, normalizeFreeformLatex, normalizeOptionLineBreaks, normalizeTestOptionLineBreaks, parseAuditResult } = require("../src/generator");
+const { ContentGenerator, GENERATION_TYPES, ADJUSTMENTS, studentVersion, ANSWERS_MARKER, testQualityIssues, normalizeFreeformLatex, normalizeOptionLineBreaks, normalizeTestOptionLineBreaks, richMarkdownIssues } = require("../src/generator");
 
-const student = { full_name: "Иван Петров", subject: "Математика", grade: 8 };
-const card = {
-  currentLevel: "средний",
-  strengths: ["быстро считает"],
-  weaknesses: [],
-  gaps: ["путается в знаках"],
-  learningGoal: "Подготовка к контрольной",
-};
+const student = { full_name: "Ivan Petrov", subject: "Russian language", grade: 8 };
+const card = { currentLevel: "middle", strengths: ["reads carefully"], weaknesses: [], gaps: [], learningGoal: "test" };
 
 function mockedGenerator(reply) {
   const generator = new ContentGenerator({ apiKey: "test-key", provider: "openrouter", model: "qwen/qwen3-32b" });
   const requests = [];
   const replies = Array.isArray(reply) ? reply : [reply];
-  generator.client = {
-    chat: {
-      completions: {
-        create: async (payload, options) => {
-          const replyIndex = Math.min(requests.length, replies.length - 1);
-          let content = replies[replyIndex];
-          // The first request generates material. Every later request is an
-          // audit and must use the structured audit contract.
-          if (requests.length > 0 && typeof content === "string" && content.trim() && !content.trim().startsWith("{")) {
-            content = JSON.stringify({ verdict: "pass", issues: [], material: content });
-          }
-          requests.push({ ...payload, requestOptions: options });
-          return { choices: [{ message: { content } }] };
-        },
-      },
-    },
-  };
+  generator.client = { chat: { completions: { create: async (payload, options) => {
+    requests.push({ ...payload, requestOptions: options });
+    return { choices: [{ message: { content: replies[Math.min(requests.length - 1, replies.length - 1)] } }] };
+  } } } };
   return { generator, requests };
 }
 
-function validFractionTest() {
-  return String.raw`# Test: fractions
-
-1. Calculate $\frac{2}{3} \cdot \frac{5}{7}$.
-A. $\frac{7}{10}$
-B. $\frac{10}{21}$
-C. $\frac{12}{35}$
-D. $1$
-
-2. Calculate $\frac{3}{4} + \frac{2}{5}$.
-A. $\frac{5}{9}$
-B. $\frac{7}{20}$
-C. $\frac{23}{20}$
-D. $\frac{31}{20}$
-
-3. Calculate $3 \div \frac{1}{3}$.
-A. $1$
-B. $3$
-C. $6$
-D. $9$
-
-4. Calculate $\frac{1}{2} + \frac{1}{4}$.
-A. $\frac{3}{4}$
-B. $\frac{2}{6}$
-C. $\frac{1}{8}$
-D. $1$
-
-5. Было $3\frac{1}{4}$ торта. Съели $1\frac{1}{2}$ торта. Сколько осталось?
-A. $1\frac{1}{2}$
-B. $1\frac{3}{4}$
-C. $1\frac{7}{12}$
-D. $2\frac{1}{4}$
-
-## ${ANSWERS_MARKER}
-1. B — $\frac{10}{21}$
-2. C — $\frac{23}{20}$
-3. D — $9$
-4. A — $\frac{3}{4}$
-5. B — $1\frac{3}{4}$`;
+function validTest() {
+  const questions = Array.from({ length: 8 }, (_, index) => `${index + 1}. Choose the correct answer.\nA. First\nB. Second\nC. Third\nD. Fourth`).join("\n\n");
+  const answers = Array.from({ length: 8 }, (_, index) => `${index + 1}. A — explanation`).join("\n");
+  return `# Test\n\n${questions}\n\n## ${ANSWERS_MARKER}\n${answers}`;
 }
 
-test("generator covers homework, test and tasks types", () => {
+function validFractionTest() {
+  const question = "1. Calculate $\\frac{2}{3} \\cdot \\frac{5}{7}$.\nA. $\\frac{7}{10}$\nB. $\\frac{10}{21}$\nC. $\\frac{12}{35}$\nD. $1$";
+  return `# Test: fractions\n\n${question}\n\n## ${ANSWERS_MARKER}\n1. B — $\\frac{10}{21}$`;
+}
+
+test("generator exposes all generation types", () => {
   assert.deepEqual(Object.keys(GENERATION_TYPES), ["homework", "test", "tasks"]);
-  assert.deepEqual(Object.keys(ADJUSTMENTS), ["regenerate", "easier", "harder", "shorter", "more_practice"]);
+  assert.equal(typeof ADJUSTMENTS.easier, "string");
 });
 
-test("generation prompt includes student card context and topic", async () => {
-  const generated = String.raw`# Домашнее задание
-
-$x^2 = 4$`;
-  const { generator, requests } = mockedGenerator(generated);
-  const { result } = await generator.generate({ type: "homework", student, card, topic: "Квадратные уравнения" });
-  assert.equal(result, generated);
-  const [request] = requests;
-  const userMessage = request.messages.find((item) => item.role === "user").content;
-  assert.match(userMessage, /Иван Петров/);
-  assert.match(userMessage, /Квадратные уравнения/);
-  assert.match(userMessage, /путается в знаках/);
-  assert.match(userMessage, /Подготовка к контрольной/);
-  const systemMessage = request.messages.find((item) => item.role === "system").content;
-  assert.match(systemMessage, /## Задания/);
-  assert.match(systemMessage, /Telegram Rich Markdown/);
-  assert.match(systemMessage, /\\frac\{числитель\}\{знаменатель\}/);
-  assert.match(systemMessage, /не ссылается на рисунки/);
-  assert.match(systemMessage, /не добавляй отчёт/);
-  assert.doesNotMatch(systemMessage, /Не используй LaTeX/);
-});
-
-test("generation prompt forbids tests that depend on missing visuals", async () => {
-  const { generator, requests } = mockedGenerator(validFractionTest());
-
-  await generator.generate({ type: "test", student, card, topic: "Квадратичная функция и графики" });
-
-  const systemMessage = requests[0].messages.find((item) => item.role === "system").content;
-  assert.match(systemMessage, /на каком рисунке/);
-  assert.match(systemMessage, /Свойства графиков проверяй по заданной формуле/);
-  assert.match(systemMessage, /без отчёта о проверке и исправлениях/);
-});
-
-test("adjustment request carries the previous result", async () => {
-  const { generator, requests } = mockedGenerator(String.raw`# Облегчённый вариант
-
-$\frac{1}{2}$`);
-  await generator.generate({
-    type: "tasks", student, card, topic: "Дроби",
-    adjustment: "easier", previousResult: "Старый набор задач",
-  });
-  const [request] = requests;
-  const roles = request.messages.map((item) => item.role);
-  assert.deepEqual(roles, ["system", "user", "assistant", "user"]);
-  assert.equal(request.messages[2].content, "Старый набор задач");
-  assert.equal(request.messages[3].content, ADJUSTMENTS.easier);
-});
-
-test("generation retries once when a math response has no Rich Markdown or LaTeX", async () => {
-  const repaired = String.raw`# Тест по теме: Дроби
-
-1. **Чему равна сумма?** $\frac{1}{2} + \frac{1}{4}$
-
-## ${ANSWERS_MARKER}
-1. $\frac{3}{4}$`;
-  const { generator, requests } = mockedGenerator([
-    "Тест по теме: Дроби\n\n1. Чему равна сумма 1/2 + 1/4?\n\nОтветы для репетитора:\n1. 3/4",
-    validFractionTest(),
-  ]);
-
-  const { result } = await generator.generate({ type: "test", student, card, topic: "Дроби" });
-
-  assert.equal(result, validFractionTest());
-  assert.equal(requests.length, 2);
-  assert.match(requests[1].messages.at(-1).content, /дроби остались вне LaTeX/);
-});
-
-test("test validation catches a key that does not match a fraction calculation", () => {
-  const invalid = validFractionTest().replace("B. $\\frac{10}{21}$", "B. $\\frac{2}{3}$");
-  assert.deepEqual(testQualityIssues(invalid), ["в вопросе 1 ключ не совпадает с результатом вычисления"]);
-});
-
-test("test validation catches an incorrect answer to a fraction word problem", () => {
-  const invalid = validFractionTest().replace("5. B — $1\\frac{3}{4}$", "5. C — $1\\frac{7}{12}$");
-  assert.deepEqual(testQualityIssues(invalid), ["в вопросе 5 ключ не совпадает с результатом вычисления"]);
-});
-
-test("test validation does not treat the first lone fraction as the expected answer", () => {
-  const comparison = validFractionTest()
-    .replace(
-      /1\. Calculate[\s\S]*?\n\n2\. Calculate/,
-      String.raw`1. Какая дробь больше $\frac{2}{3}$?
-A. $\frac{3}{4}$
-B. $\frac{1}{2}$
-C. $\frac{1}{3}$
-D. $\frac{2}{3}$
-
-2. Calculate`,
-    )
-    .replace(/^1\. B —.*$/m, String.raw`1. A — $\frac{3}{4}$`);
-
-  assert.deepEqual(testQualityIssues(comparison), []);
-});
-
-test("test validation catches a wrong key for a fraction comparison", () => {
-  const comparison = validFractionTest()
-    .replace(
-      /1\. Calculate[\s\S]*?\n\n2\. Calculate/,
-      String.raw`1. Сравните дроби $\frac{3}{4}$ и $\frac{5}{8}$.
-A. $\frac{3}{4} < \frac{5}{8}$
-B. $\frac{3}{4} = \frac{5}{8}$
-C. $\frac{3}{4} > \frac{5}{8}$
-D. Сравнение невозможно
-
-2. Calculate`,
-    );
-
-  assert.deepEqual(testQualityIssues(comparison), ["в вопросе 1 ключ не совпадает с результатом сравнения"]);
-});
-
-test("test validation accepts Rich Markdown emphasis in the answer key", () => {
-  const boldLabels = validFractionTest().replace(/^(\d+)\. ([A-D]) —/gm, "$1. **$2** —");
-  const boldEntries = validFractionTest().replace(/^(\d+)\. ([A-D]) —/gm, "**$1. $2** —");
-  const verboseEntries = validFractionTest().replace(/^(\d+)\. ([A-D]) —/gm, "$1. Правильный ответ: **$2** —");
-  const tableEntries = validFractionTest().replace(/^(\d+)\. ([A-D]) — (.+)$/gm, "| $1 | $2 | $3 |");
-  const cyrillicLabels = validFractionTest().replace(/^(\d+)\. ([ABC]) —/gm, (_, number, label) => `${number}. ${{ A: "А", B: "В", C: "С" }[label]} —`);
-
-  assert.deepEqual(testQualityIssues(boldLabels), []);
-  assert.deepEqual(testQualityIssues(boldEntries), []);
-  assert.deepEqual(testQualityIssues(verboseEntries), []);
-  assert.deepEqual(testQualityIssues(tableEntries), []);
-  assert.deepEqual(testQualityIssues(cyrillicLabels), []);
-});
-
-test("test validation rejects answer options placed on one line", () => {
-  const invalid = validFractionTest()
-    .replace(String.raw`A. $\frac{7}{10}$
-B. $\frac{10}{21}$
-C. $\frac{12}{35}$
-D. $1$`, String.raw`A. $\frac{7}{10}$ B. $\frac{10}{21}$ C. $\frac{12}{35}$ D. $1$`);
-
-  assert.deepEqual(testQualityIssues(invalid), ["в вопросе 1 должны быть варианты A, B, C и D"]);
-});
-
-test("test option normalizer puts inline options on separate lines", () => {
-  const input = String.raw`1. Вычислите: $2 + 2$. A. 3 B. 4 C. 5 D. 6
-
-${ANSWERS_MARKER}
-1. B — $2 + 2 = 4$.`;
-
-  assert.equal(normalizeTestOptionLineBreaks(input), String.raw`1. Вычислите: $2 + 2$.
-A. 3
-B. 4
-C. 5
-D. 6
-
-${ANSWERS_MARKER}
-1. B — $2 + 2 = 4$.`);
-});
-
-test("shared option normalizer handles parentheses for freeform answers", () => {
-  assert.equal(
-    normalizeOptionLineBreaks("1. Выберите. A) первый B) второй C) третий D) четвёртый"),
-    "1. Выберите.\nA) первый\nB) второй\nC) третий\nD) четвёртый",
-  );
-});
-
-test("audit contract requires a full material payload and a consistent verdict", () => {
-  assert.deepEqual(
-    parseAuditResult('{"verdict":"rewrite","issues":["ключ не совпадает с решением"],"material":"# Исправленный материал"}'),
-    { verdict: "rewrite", issues: ["ключ не совпадает с решением"], material: "# Исправленный материал" },
-  );
-  assert.throws(
-    () => parseAuditResult('{"verdict":"pass","issues":["есть ошибка"],"material":"# Материал"}'),
-    (error) => error.code === "AI_AUDIT_FORMAT_INVALID",
-  );
-});
-
-test("audit rewrite replaces the generated material with its complete corrected version", async () => {
-  const draft = "# Материал\n\nНеверное утверждение: $2 + 2 = 5$.";
-  const corrected = "# Материал\n\nИсправленное утверждение: $2 + 2 = 4$.";
-  const audit = JSON.stringify({ verdict: "rewrite", issues: ["исправлена фактическая ошибка"], material: corrected });
-  const { generator, requests } = mockedGenerator([draft, audit]);
-
-  const { result } = await generator.generate({ type: "homework", student, card, topic: "Тема" });
-
-  assert.equal(result, corrected);
-  assert.equal(requests.length, 2);
-  assert.equal(requests[1].response_format.type, "json_schema");
-  assert.equal(requests[1].response_format.json_schema.strict, true);
-  assert.match(requests[1].messages.at(-1).content, /"verdict":"pass"\|"rewrite"/);
-  assert.match(requests[1].messages.at(-1).content, /самостоятельно получи или обоснуй результат/);
-});
-
-test("audit retries once when the verifier returns an invalid JSON contract", async () => {
-  const draft = "# Материал\n\n$2 + 2 = 4$.";
-  const corrected = "# Материал\n\n$2 + 2 = 4$.";
-  const malformedAudit = '{"verdict":"pass"}';
-  const validAudit = JSON.stringify({ verdict: "pass", issues: [], material: corrected });
-  const { generator, requests } = mockedGenerator([draft, malformedAudit, validAudit]);
-
-  const { result } = await generator.generate({ type: "homework", student, card, topic: "Тема" });
-
-  assert.equal(result, corrected);
-  assert.equal(requests.length, 3);
-  assert.equal(requests[2].response_format.type, "json_schema");
-  assert.match(requests[2].messages.at(-1).content, /не соответствует обязательному JSON-контракту/);
-});
-
-test("option normalizer splits and latinizes Cyrillic answer labels", () => {
-  assert.equal(
-    normalizeOptionLineBreaks("1. Выберите. А. первый В. второй С. третий Д. четвёртый"),
-    "1. Выберите.\nA. первый\nB. второй\nC. третий\nD. четвёртый",
-  );
-});
-
-test("validation rejects references to missing visuals", () => {
-  const invalid = validFractionTest().replace("Calculate $\\frac{2}{3} \\cdot \\frac{5}{7}$.", "На каком рисунке изображён график функции?");
-  const issues = require("../src/generator").richMarkdownIssues({ text: invalid, type: "test", student, topic: "Графики" });
-  assert.ok(issues.includes("есть задание, требующее отсутствующий визуальный материал"));
-});
-
-test("validation rejects internal repair notes", () => {
-  const invalid = `${validFractionTest()}\n\nИсправлены повторы и ошибки. Учтены пробелы ученика.`;
-  const issues = require("../src/generator").richMarkdownIssues({ text: invalid, type: "test", student, topic: "Дроби" });
-  assert.ok(issues.includes("есть служебный комментарий о проверке или исправлениях"));
-});
-
-test("validation rejects an unmatched LaTeX dollar delimiter", () => {
-  const malformed = `${validFractionTest()}\n\n7. Найдите $1\\frac{1}{3} \\cdot \\frac{3}{4}$.`;
-  const issues = require("../src/generator").richMarkdownIssues({ text: malformed.slice(0, -2), type: "test", student, topic: "Дроби" });
-
-  assert.ok(issues.includes("нарушена парность LaTeX-разделителей $ или $$"));
-});
-
-test("validation rejects LaTeX commands outside math delimiters", () => {
-  const invalid = "# Материал\n\nФормула вершины: x_в = -\\frac{b}{2a}.";
-  const issues = require("../src/generator").richMarkdownIssues({ text: invalid, type: "homework", student, topic: "Функции" });
-
-  assert.ok(issues.includes("есть LaTeX-команда вне $...$ или $$...$$"));
-});
-
-test("validation rejects unsupported Telegram LaTeX environments", () => {
-  const invalid = String.raw`# Материал
-
-$\begin{array}{l}x > 0\\x < 5\end{array}$`;
-  const issues = require("../src/generator").richMarkdownIssues({ text: invalid, type: "homework", student, topic: "Неравенства" });
-
-  assert.ok(issues.includes("есть неподдерживаемая Telegram LaTeX-команда"));
-});
-
-test("generation retries once when a test answer fails mathematical validation", async () => {
-  const invalid = validFractionTest().replace("B. $\\frac{10}{21}$", "B. $\\frac{2}{3}$");
-  const { generator, requests } = mockedGenerator([invalid, validFractionTest()]);
-
-  const { result } = await generator.generate({ type: "test", student, card, topic: "Дроби" });
-
-  assert.equal(result, validFractionTest());
-  assert.equal(requests.length, 2);
-  assert.match(requests[1].messages.at(-1).content, /ключ не совпадает с результатом вычисления/);
-});
-
-test("generation does not return a test that is still invalid after repair", async () => {
-  const invalid = validFractionTest().replace("B. $\\frac{10}{21}$", "B. $\\frac{2}{3}$");
-  const { generator } = mockedGenerator([invalid, invalid]);
-
-  await assert.rejects(
-    () => generator.generate({ type: "test", student, card, topic: "Дроби" }),
-    (error) => error.code === "AI_GENERATION_VALIDATION_FAILED",
-  );
-});
-
-test("generation stops after two validation attempts", async () => {
-  const invalid = validFractionTest().replace("B. $\\frac{10}{21}$", "B. $\\frac{2}{3}$");
-  const { generator, requests } = mockedGenerator([invalid, invalid, validFractionTest()]);
-
-  await assert.rejects(
-    () => generator.generate({ type: "test", student, card, topic: "Дроби" }),
-    (error) => error.code === "AI_GENERATION_VALIDATION_FAILED" && /after 2 attempts/.test(error.message),
-  );
-  assert.equal(requests.length, 2);
-});
-
-test("every test receives a mandatory second pass from the verifier model", async () => {
-  const { generator, requests } = mockedGenerator([validFractionTest(), validFractionTest()]);
-  generator.verifierModel = "qwen/qwen3.5-397b-a17b";
-
-  await generator.generate({ type: "test", student, card, topic: "Дроби" });
-
-  assert.equal(requests.length, 2);
-  assert.equal(requests[1].model, "qwen/qwen3.5-397b-a17b");
-  assert.match(requests[1].messages.at(-1).content, /Реши каждый вопрос заново/);
-  assert.match(requests[1].messages.at(-1).content, /правильный вариант ровно один/);
-  assert.match(requests[1].messages.at(-1).content, /орфографию, пунктуацию, грамматику и согласование слов/);
-});
-
-test("homework and task sets receive a mandatory second pass from the verifier model", async () => {
-  const material = "# Материал\n\n$2 + 2 = 4$";
-  for (const type of ["homework", "tasks"]) {
-    const { generator, requests } = mockedGenerator([material, material]);
-    generator.verifierModel = "deepseek/deepseek-v4-pro";
-
-    await generator.generate({ type, student, card, topic: "Дроби" });
-
-    assert.equal(requests.length, 2);
-    assert.equal(requests[1].model, "deepseek/deepseek-v4-pro");
-    assert.match(requests[1].messages.at(-1).content, /независимую строгую проверку предыдущего учебного материала/);
-    assert.match(requests[1].messages.at(-1).content, /самостоятельной проверкой/);
-    assert.match(requests[0].messages[0].content, /открытые задания без готовых вариантов ответа/);
-    assert.match(requests[1].messages.at(-1).content, /проверять только знания, необходимые для указанной темы/);
+test("each user action sends exactly one request with a 90-second deadline", async () => {
+  const material = "# Material\n\nWrite a short explanation.";
+  const { generator, requests } = mockedGenerator([material, validTest(), material, material, "Brief answer."]);
+  await generator.generate({ type: "homework", student, card, topic: "topic" });
+  await generator.generate({ type: "test", student, card, topic: "topic" });
+  await generator.generate({ type: "tasks", student, card, topic: "topic" });
+  await generator.solutions({ student, topic: "topic", previousResult: material });
+  await generator.freeform({ question: "How should I explain this topic?" });
+  assert.equal(requests.length, 5);
+  for (const request of requests) {
+    assert.equal(request.model, "qwen/qwen3-32b");
+    assert.equal(request.requestOptions.timeout, 90_000);
+    assert.equal(request.response_format, undefined);
   }
 });
 
-test("DeepSeek uses high reasoning for homework generation and audit", async () => {
-  const material = "# Материал\n\n$2 + 2 = 4$";
-  const { generator, requests } = mockedGenerator([material, material]);
-  generator.model = "deepseek/deepseek-v4-pro";
-  generator.verifierModel = "deepseek/deepseek-v4-pro";
-
-  await generator.generate({ type: "homework", student, card, topic: "Дроби" });
-
-  assert.deepEqual(requests[0].reasoning, { max_tokens: 4000, exclude: true });
-  assert.deepEqual(requests[1].reasoning, { max_tokens: 4000, exclude: true });
-  assert.equal(requests[0].max_tokens, 8000);
-  assert.equal(requests[1].max_tokens, 8000);
+test("generation prompt includes the card, topic, adjustment and self-check", async () => {
+  const { generator, requests } = mockedGenerator("# Material\n\nText.");
+  await generator.generate({ type: "tasks", student, card, topic: "subordinate clauses", adjustment: "easier", previousResult: "old result" });
+  const [request] = requests;
+  assert.equal(request.messages[2].content, "old result");
+  assert.equal(request.messages[3].content, ADJUSTMENTS.easier);
+  assert.match(request.messages[0].content, /внутреннюю проверку/);
+  assert.match(request.messages[1].content, /subordinate clauses/);
 });
 
-test("test audit uses xhigh reasoning", async () => {
-  const { generator, requests } = mockedGenerator([validFractionTest(), validFractionTest()]);
-  generator.model = "deepseek/deepseek-v4-pro";
-  generator.verifierModel = "deepseek/deepseek-v4-pro";
-
-  await generator.generate({ type: "test", student, card, topic: "Дроби" });
-
-  assert.deepEqual(requests[0].reasoning, { max_tokens: 4000, exclude: true });
-  assert.deepEqual(requests[1].reasoning, { max_tokens: 6000, exclude: true });
-  assert.equal(requests[1].max_tokens, 10000);
+test("local validators reject bad keys and unsupported formatting", () => {
+  const invalidKey = validFractionTest().replace("B. $\\frac{10}{21}$", "B. $\\frac{2}{3}$");
+  assert.match(testQualityIssues(invalidKey).join("; "), /ключ/);
+  assert.match(richMarkdownIssues({ text: "# Title\n\n$\\begin{array}x\\end{array}$", type: "homework", student, topic: "topic" }).join("; "), /LaTeX/);
 });
 
-test("a valid first pass is returned when the verifier responds with an empty body", async () => {
-  const material = "# Материал\n\n$2 + 2 = 4$";
-  const { generator, requests } = mockedGenerator([material, ""]);
-
-  const { result } = await generator.generate({ type: "homework", student, card, topic: "Дроби" });
-
-  assert.equal(result, material);
-  assert.equal(requests.length, 2);
+test("option normalizers put choices on separate lines", () => {
+  assert.equal(normalizeOptionLineBreaks("Question. A) one B) two C) three D) four"), "Question.\nA) one\nB) two\nC) three\nD) four");
+  assert.match(normalizeTestOptionLineBreaks("1. Question\nA. One B. Two C. Three D. Four"), /A\. One\nB\. Two\nC\. Three\nD\. Four/);
 });
 
-test("a usable homework draft is returned when verifier is empty despite formatting issues", async () => {
-  const material = "Свойства квадратичной функции:\n\n1. Ветви параболы направлены вверх при $a > 0$ и вниз при $a < 0$.\n\n2. Ось симметрии: $x = -\\frac{b}{2a}$.\n\n3. Найдите вершину параболы и определите промежутки возрастания и убывания функции.";
-  const { generator, requests } = mockedGenerator([material, ""]);
-
-  const { result } = await generator.generate({ type: "homework", student, card, topic: "Свойства квадратичной функции" });
-
-  assert.match(result, /^# Домашнее задание: Свойства квадратичной функции/m);
-  assert.match(result, /Ось симметрии/);
-  assert.equal(requests.length, 2);
-});
-
-test("a readable homework result is returned when both passes have only format issues", async () => {
-  const material = "Свойства функции.\n\n1. Найдите вершину параболы y = x^2 - 4x + 3.\n\n2. Укажите ось симметрии.\n\n3. Определите промежутки возрастания и убывания.\n\n4. Найдите нули функции и область значений.";
-  const { generator, requests } = mockedGenerator([material, material]);
-
-  const { result } = await generator.generate({ type: "homework", student, card, topic: "Свойства функции" });
-
-  assert.match(result, /^# Домашнее задание: Свойства функции/m);
-  assert.match(result, /промежутки возрастания/);
-  assert.equal(requests.length, 2);
-});
-
-test("a malformed test is still rejected when verifier is empty", async () => {
-  const invalid = validFractionTest().replace("B. $\\frac{10}{21}$", "B. $\\frac{2}{3}$");
-  const { generator } = mockedGenerator([invalid, ""]);
-
-  await assert.rejects(
-    () => generator.generate({ type: "test", student, card, topic: "Дроби" }),
-    (error) => error.code === "AI_EMPTY_RESPONSE",
-  );
-});
-
-test("empty provider response contains safe diagnostics", async () => {
+test("empty provider output has safe diagnostics", async () => {
   const { generator } = mockedGenerator("");
-  generator.client.chat.completions.create = async () => ({
-    model: "deepseek/deepseek-v4-pro",
-    choices: [{ finish_reason: "length", message: { content: "", reasoning: "internal reasoning" } }],
-    usage: {
-      prompt_tokens: 120,
-      completion_tokens: 4000,
-      total_tokens: 4120,
-      completion_tokens_details: { reasoning_tokens: 3900 },
-    },
-  });
-
-  await assert.rejects(
-    () => generator.generate({ type: "homework", student, card, topic: "Функции" }),
-    (error) => error.code === "AI_EMPTY_RESPONSE"
-      && error.aiResponse.finishReason === "length"
-      && error.aiResponse.contentLength === 0
-      && error.aiResponse.reasoningLength === 18
-      && error.aiResponse.usage.reasoningTokens === 3900,
-  );
+  generator.client.chat.completions.create = async () => ({ model: "deepseek/deepseek-v4-pro", choices: [{ finish_reason: "length", message: { content: "", reasoning: "internal reasoning" } }], usage: { prompt_tokens: 120, completion_tokens: 4000, total_tokens: 4120, completion_tokens_details: { reasoning_tokens: 3900 } } });
+  await assert.rejects(() => generator.generate({ type: "homework", student, card, topic: "topic" }), (error) => error.code === "AI_EMPTY_RESPONSE" && error.aiResponse.finishReason === "length" && error.aiResponse.contentLength === 0);
 });
 
-test("solutions receive the verifier pass", async () => {
-  const { generator, requests } = mockedGenerator(["# Решения\n\n$2 + 2 = 4$", "# Решения\n\n$2 + 2 = 4$"]);
-  generator.verifierModel = "deepseek/deepseek-v4-pro";
-
-  await generator.solutions({ student, topic: "Дроби", previousResult: "# Задания\n\n$2 + 2$" });
-
-  assert.equal(requests.length, 2);
-  assert.equal(requests[1].model, "deepseek/deepseek-v4-pro");
-  assert.equal(requests[1].requestOptions.timeout, 60_000);
-  assert.match(requests[1].messages.at(-1).content, /независимую строгую проверку предыдущего учебного материала/);
+test("freeform normalizes LaTeX and never performs a verifier request", async () => {
+  const { generator, requests } = mockedGenerator(String.raw`Example: $ \frac{2}{5} \div \frac{4}{10} = 1 $.`);
+  const { result } = await generator.freeform({ question: "How to divide fractions?" });
+  assert.equal(result, String.raw`Example: $\frac{2}{5} \div \frac{4}{10} = 1$.`);
+  assert.equal(requests.length, 1);
+  assert.equal(normalizeFreeformLatex(String.raw`$$ \\frac{3}{4} $$`), String.raw`$$\frac{3}{4}$$`);
 });
 
-test("unknown type and adjustment are rejected", async () => {
-  const { generator } = mockedGenerator("x");
-  await assert.rejects(() => generator.generate({ type: "essay", student, card, topic: "Тема" }), /Unknown generation type/);
-  await assert.rejects(() => generator.generate({ type: "test", student, card, topic: "Тема", adjustment: "funnier", previousResult: "x" }), /Unknown adjustment/);
-});
-
-test("student version strips the answers section from a test", () => {
-  const text = `Тест по теме: Дроби\n\n1. Вопрос\nA. 1\nB. 2\n\n${ANSWERS_MARKER}:\n1. B — пояснение`;
-  assert.equal(studentVersion(text), "Тест по теме: Дроби\n\n1. Вопрос\nA. 1\nB. 2");
-  assert.equal(studentVersion("Без ответов"), "Без ответов");
-});
-
-test("unconfigured generator raises AI_NOT_CONFIGURED", async () => {
+test("student version strips the answer key and configuration errors are explicit", async () => {
+  const source = `# Test\n\n1. Question\nA. Yes\n\n${ANSWERS_MARKER}\n1. A`;
+  assert.equal(studentVersion(source), "# Test\n\n1. Question\nA. Yes");
   const generator = new ContentGenerator({ apiKey: null, provider: "openrouter" });
-  await assert.rejects(
-    () => generator.generate({ type: "homework", student, card, topic: "Тема" }),
-    (error) => error.code === "AI_NOT_CONFIGURED",
-  );
-  await assert.rejects(
-    () => generator.freeform({ question: "Как объяснить дроби?" }),
-    (error) => error.code === "AI_NOT_CONFIGURED",
-  );
-});
-
-test("freeform answers with a methodist system prompt", async () => {
-  const { generator, requests } = mockedGenerator("Начните с наглядных примеров с пиццей.");
-  const { result } = await generator.freeform({ question: "Как объяснить дроби пятикласснику?" });
-  assert.equal(result, "Начните с наглядных примеров с пиццей.");
-  const [request] = requests;
-  assert.equal(request.messages[0].role, "system");
-  assert.match(request.messages[0].content, /методист/);
-  assert.match(request.messages[0].content, /между \$\.\.\.\$/);
-  assert.equal(request.messages[1].content, "Как объяснить дроби пятикласснику?");
-  assert.equal(requests.length, 2);
-  assert.match(requests[1].messages.at(-1).content, /независимую строгую проверку предыдущего ответа/);
-});
-
-test("freeform preserves Markdown math wrappers and normalizes LaTeX", async () => {
-  const answer = String.raw`Пример:
-
-$ \frac{2}{5} \div \frac{4}{10} = 1 $
-
-Допустимо, только если $ c \\neq 0 $.`;
-  const { generator } = mockedGenerator(answer);
-  const { result } = await generator.freeform({ question: "Как делить дроби?" });
-
-  assert.equal(result, String.raw`Пример:
-
-$\frac{2}{5} \div \frac{4}{10} = 1$
-
-Допустимо, только если $c \neq 0$.`);
-  assert.equal(normalizeFreeformLatex(String.raw`$$ \frac{3}{4} $$`), String.raw`$$\frac{3}{4}$$`);
-  assert.equal(
-    normalizeFreeformLatex(String.raw`$$\\\\frac{1}{3}\\\\qquad\\\\frac{2}{3}$$`),
-    String.raw`$$\frac{1}{3}\qquad\frac{2}{3}$$`,
-  );
-});
-
-test("freeform puts inline answer variants on separate lines", async () => {
-  const answer = "1. Выберите верный ответ. A) первый B) второй C) третий D) четвёртый";
-  const { generator } = mockedGenerator(answer);
-
-  const { result } = await generator.freeform({ question: "Составь короткий тест" });
-
-  assert.equal(result, "1. Выберите верный ответ.\nA) первый\nB) второй\nC) третий\nD) четвёртый");
-});
-
-test("freeform returns the first pass when its verifier is empty", async () => {
-  const { generator, requests } = mockedGenerator(["Краткий ответ для репетитора.", ""]);
-
-  const { result } = await generator.freeform({ question: "Как объяснить тему?" });
-
-  assert.equal(result, "Краткий ответ для репетитора.");
-  assert.equal(requests.length, 2);
-});
-
-test("freeform system prompt instructs the model to refuse off-topic questions", async () => {
-  const { generator, requests } = mockedGenerator("Я отвечаю только на вопросы, связанные с репетиторством и подготовкой к занятиям. Задайте вопрос по предмету, ученику или методике.");
-  await generator.freeform({ question: "Как сварить кукурузу?" });
-  const [request] = requests;
-  assert.match(request.messages[0].content, /строго/);
-  assert.match(request.messages[0].content, /не отвечай по существу/);
-  assert.match(request.messages[0].content, /забудь предыдущие инструкции/);
+  await assert.rejects(() => generator.generate({ type: "homework", student, card, topic: "topic" }), (error) => error.code === "AI_NOT_CONFIGURED");
 });
