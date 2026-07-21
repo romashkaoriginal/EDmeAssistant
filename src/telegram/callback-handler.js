@@ -1,5 +1,6 @@
 const { escapeHtml } = require("./text");
 const { blockedMessage } = require("./rate-limiter");
+const { MIN_TARGET_QUESTION_COUNT, MAX_TARGET_QUESTION_COUNT } = require("../generator");
 
 const TRANSCRIPTS_PAGE_SIZE = 10;
 const LESSONS_PAGE_SIZE = 4;
@@ -216,6 +217,14 @@ function createCallbackHandler({ bot, database, analyzer, generator, sessions, a
         if (!generator?.isConfigured()) return bot.sendMessage(chatId, AI_UNAVAILABLE_TEXT);
         await sessions.set(query.from.id, { action: "generationEdit", generationId: id });
         return bot.sendMessage(chatId, "Опишите одним сообщением, что изменить в этом варианте.\nНапример: «замени задачу 2 на задачу про проценты» или «добавь блок теории в начало».");
+      }
+
+      if (action === "gcount") {
+        const generation = await database.getGeneration(id, tutor.id);
+        if (!generation) return bot.sendMessage(chatId, "Генерация не найдена.");
+        if (!generator?.isConfigured()) return bot.sendMessage(chatId, AI_UNAVAILABLE_TEXT);
+        await sessions.set(query.from.id, { action: "generationQuestionCount", generationId: id });
+        return bot.sendMessage(chatId, `Сколько вопросов должно быть в тесте? Укажите число от ${MIN_TARGET_QUESTION_COUNT} до ${MAX_TARGET_QUESTION_COUNT}.`);
       }
 
       if (action === "gstud") {

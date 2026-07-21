@@ -373,8 +373,7 @@ function createBot({ token, database, analyzer, moyKlass, generator }) {
     ];
     if (generation.type === "test") {
       rows.push([
-        { text: "Больше вопросов", callback_data: `gadj:${generation.id}:more_questions` },
-        { text: "Меньше вопросов", callback_data: `gadj:${generation.id}:fewer_questions` },
+        { text: "Изменить число вопросов", callback_data: `gcount:${generation.id}` },
       ]);
       rows.push([{ text: "Версия для ученика", callback_data: `gstud:${generation.id}` }]);
     }

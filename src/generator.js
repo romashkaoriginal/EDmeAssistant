@@ -2,20 +2,28 @@ const OpenAI = require("openai");
 
 const ANSWERS_MARKER = "Ответы для репетитора";
 
+const LATEX_ENVIRONMENT_WARNING = String.raw`Telegram не поддерживает LaTeX-окружения \begin{...}...\end{...} (cases, align, matrix, array и подобные) — такие формулы отображаются сломанными. Никогда их не используй.
+Систему уравнений или разбор по случаям оформляй обычным текстом: вводную фразу, затем каждый случай отдельным пунктом списка или отдельной строкой со своей формулой в $...$, например:
+При $x > 1$: $x^2 < 5 \implies x < \sqrt{5}$.
+При $0 < x < 1$: $x^2 > 5 \implies x > \sqrt{5}$ — противоречит условию, решений нет.`;
+
 const RICH_MARKDOWN_INSTRUCTIONS = String.raw`Форматируй ответ в Telegram Rich Markdown.
 Используй заголовки # и ##, списки и **жирные** подписи, но не оборачивай весь ответ в блок кода.
 Каждую математическую запись оформляй как LaTeX: короткую формулу помещай между $...$, отдельную большую формулу — между $$...$$.
 Дроби всегда записывай через \frac{числитель}{знаменатель}, например: $\frac{3}{4} + \frac{1}{8}$. Смешанное число записывай так: $1\frac{1}{2}$.
-Не оставляй математические выражения в виде обычного текста вроде 3/4 и не используй для формул обратные кавычки.`;
+Не оставляй математические выражения в виде обычного текста вроде 3/4 и не используй для формул обратные кавычки.
+${LATEX_ENVIRONMENT_WARNING}`;
 
 const FREEFORM_RICH_MARKDOWN_INSTRUCTIONS = String.raw`Форматируй ответ для Telegram Rich Markdown: используй заголовки, списки и **жирные** подписи.
 Каждую математическую запись оформляй как LaTeX: короткую формулу помещай между $...$, отдельную большую формулу — между $$...$$. Дроби всегда записывай через \frac{числитель}{знаменатель}, например: $\frac{3}{4} + \frac{1}{8}$.
-Не ставь пробелы сразу после открывающего $ или перед закрывающим $. Не используй для формул обратные кавычки или блоки кода. Не экранируй LaTeX-команды двойным обратным слешем: правильно \neq, а не \\neq.`;
+Не ставь пробелы сразу после открывающего $ или перед закрывающим $. Не используй для формул обратные кавычки или блоки кода. Не экранируй LaTeX-команды двойным обратным слешем: правильно \neq, а не \\neq.
+${LATEX_ENVIRONMENT_WARNING}`;
 
 const QUALITY_INSTRUCTIONS = `Перед выдачей результата молча проверь его:
 - все задания строго относятся к теме пользователя;
 - все понятия, темы и термины строго входят в школьную программу указанного класса; не используй темы, формулы и термины старших классов или вузовского курса, даже если они связаны с темой;
 - условия однозначны и содержат все необходимые ограничения и области определения;
+- для логарифмов с переменным основанием ОДЗ основания (основание > 0 и основание ≠ 1) указывай как исходное ограничение до решения неравенства или уравнения, а не выводи его задним числом из результата;
 - материал полностью самодостаточен в текстовом сообщении: не ссылается на рисунки, изображения, чертежи, схемы, диаграммы, таблицы или иные визуальные материалы, которых нет в ответе;
 - вычисления, ответы и пояснения математически верны;
 - в тесте ровно один правильный вариант ответа на каждый вопрос;
@@ -116,12 +124,22 @@ const GENERATION_TYPES = {
 const ADJUSTMENTS = {
   regenerate: "Сгенерируй полностью новый вариант с другими заданиями по той же теме.",
   easier: "Сделай задания заметно легче, сохранив тему и структуру.",
-  harder: "Заметно повысь сложность: замени простые задания на многошаговые и нестандартные, добавь задачи уровня ЦТ/ЦЭ, убери самые лёгкие. Тему и структуру сохрани, но разница в сложности должна быть очевидной.",
+  harder: "Заметно повысь сложность: замени простые задания на многошаговые и нестандартные, добавь задачи уровня ЦТ/ЦЭ, убери самые лёгкие. Простая замена чисел в тех же заданиях на более громоздкие не считается усложнением — это запрещено. Каждое задание должно измениться по структуре: добавь дополнительный шаг решения, объедини два действия в одно составное условие, используй другой тип задачи или другой метод решения по той же теме. Тему и структуру ответа сохрани, но разница в сложности должна быть очевидной по существу, а не только по виду чисел.",
   shorter: "Сократи объём: оставь только самое важное, структуру сохрани.",
   more_practice: "Добавь больше практических заданий, теорию сократи.",
-  more_questions: "Увеличь количество вопросов и заданий примерно в полтора раза, сохранив тему, уровень и структуру.",
-  fewer_questions: "Уменьши количество вопросов и заданий примерно в полтора раза, оставив самые показательные. Тему, уровень и структуру сохрани.",
 };
+
+const QUESTION_COUNT_PATTERN = /(\d{1,2})\s*(?:вопрос|задани|задач)/iu;
+const MIN_TARGET_QUESTION_COUNT = 3;
+const MAX_TARGET_QUESTION_COUNT = 20;
+
+function extractTargetQuestionCount(instruction) {
+  const match = QUESTION_COUNT_PATTERN.exec(String(instruction || ""));
+  if (!match) return null;
+  const count = Number(match[1]);
+  if (!Number.isInteger(count) || count < MIN_TARGET_QUESTION_COUNT || count > MAX_TARGET_QUESTION_COUNT) return null;
+  return count;
+}
 
 const MAX_OUTPUT_TOKENS = 2500;
 const MAX_CUSTOM_INSTRUCTION_LENGTH = 500;
@@ -294,7 +312,7 @@ function normalizeTestOptionLineBreaks(text) {
   return `${questions.replace(/([^\n])(?:[ \t]+)([A-D])\.\s+(?=\S)/g, "$1\n$2. ")}${answers}`;
 }
 
-function testQualityIssues(text) {
+function testQualityIssues(text, { targetQuestionCount = null } = {}) {
   const value = String(text || "");
   const markerIndex = value.indexOf(ANSWERS_MARKER);
   if (markerIndex === -1) return [];
@@ -306,7 +324,11 @@ function testQualityIssues(text) {
   const answers = parseTestAnswers(answersText);
   const issues = [];
 
-  if (questions.length < 5 || questions.length > 10) issues.push("в тесте должно быть от 8 до 10 вопросов");
+  if (targetQuestionCount) {
+    if (questions.length !== targetQuestionCount) issues.push(`в тесте должно быть ровно ${targetQuestionCount} вопросов`);
+  } else if (questions.length < 5 || questions.length > 10) {
+    issues.push("в тесте должно быть от 8 до 10 вопросов");
+  }
   if (answers.length !== questions.length) issues.push("число ответов для репетитора не совпадает с числом вопросов");
 
   const answersByNumber = new Map();
@@ -446,7 +468,7 @@ class ContentGenerator {
 
   isConfigured() { return Boolean(this.client); }
 
-  buildMessages({ type, student, card, topic, adjustment, previousResult, customInstruction }) {
+  buildMessages({ type, student, card, topic, adjustment, previousResult, customInstruction, targetQuestionCount }) {
     const spec = GENERATION_TYPES[type];
     const instructions = [
       "Ты методист, который готовит учебные материалы для репетиторов.",
@@ -476,7 +498,8 @@ class ContentGenerator {
     ];
     if (customInstruction && previousResult) {
       messages.push({ role: "assistant", content: previousResult });
-      messages.push({ role: "user", content: `Внеси правку по указанию репетитора, сохранив тему и структуру: ${customInstruction}` });
+      const countNote = targetQuestionCount ? ` Сделай ровно ${targetQuestionCount} вопросов с вариантами ответов — это приоритетнее диапазона 8-10 из общих инструкций.` : "";
+      messages.push({ role: "user", content: `Внеси правку по указанию репетитора, сохранив тему и структуру: ${customInstruction}${countNote}` });
     } else if (adjustment && previousResult) {
       messages.push({ role: "assistant", content: previousResult });
       messages.push({ role: "user", content: ADJUSTMENTS[adjustment] });
@@ -512,19 +535,20 @@ class ContentGenerator {
     if (!GENERATION_TYPES[type]) throw new Error(`Unknown generation type: ${type}`);
     if (adjustment && !ADJUSTMENTS[adjustment]) throw new Error(`Unknown adjustment: ${adjustment}`);
     const instruction = customInstruction ? String(customInstruction).slice(0, MAX_CUSTOM_INSTRUCTION_LENGTH) : null;
+    const targetQuestionCount = type === "test" ? extractTargetQuestionCount(instruction) : null;
 
-    const messages = this.buildMessages({ type, student, card, topic, adjustment, previousResult, customInstruction: instruction });
+    const messages = this.buildMessages({ type, student, card, topic, adjustment, previousResult, customInstruction: instruction, targetQuestionCount });
     let result = await this.complete(messages);
     if (type === "test") result = normalizeTestOptionLineBreaks(result);
     const validate = (candidate) => [
       ...richMarkdownIssues({ text: candidate, type, student, topic }),
-      ...(type === "test" ? testQualityIssues(candidate) : []),
+      ...(type === "test" ? testQualityIssues(candidate, { targetQuestionCount }) : []),
     ];
     let issues = validate(result);
     const needsSecondPass = type === "test" || issues.length > 0;
     if (needsSecondPass && MAX_GENERATION_ATTEMPTS > 1) {
       const correction = type === "test"
-        ? `${TEST_AUDIT_INSTRUCTIONS}${issues.length ? `\nАвтоматическая проверка также обнаружила: ${issues.join("; ")}.` : ""}`
+        ? `${TEST_AUDIT_INSTRUCTIONS}${targetQuestionCount ? `\nВ тесте должно остаться ровно ${targetQuestionCount} вопросов.` : ""}${issues.length ? `\nАвтоматическая проверка также обнаружила: ${issues.join("; ")}.` : ""}`
         : `Исправь предыдущий вариант. Проблемы: ${issues.join("; ")}. Полностью верни исправленный материал в требуемом Telegram Rich Markdown.`;
       result = await this.complete([
         ...messages,
@@ -602,5 +626,5 @@ module.exports = {
   ContentGenerator, GENERATION_TYPES, ADJUSTMENTS, studentVersion, richMarkdownIssues,
   ANSWERS_MARKER, RICH_MARKDOWN_INSTRUCTIONS, FREEFORM_RICH_MARKDOWN_INSTRUCTIONS,
   QUALITY_INSTRUCTIONS, testQualityIssues, normalizeFreeformLatex, normalizeTestOptionLineBreaks,
-  isBelarusianSubject, languageInstruction,
+  isBelarusianSubject, languageInstruction, MIN_TARGET_QUESTION_COUNT, MAX_TARGET_QUESTION_COUNT,
 };

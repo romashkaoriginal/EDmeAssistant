@@ -72,7 +72,7 @@ D. $2\frac{1}{4}$
 
 test("generator covers homework, test and tasks types", () => {
   assert.deepEqual(Object.keys(GENERATION_TYPES), ["homework", "test", "tasks"]);
-  assert.deepEqual(Object.keys(ADJUSTMENTS), ["regenerate", "easier", "harder", "shorter", "more_practice", "more_questions", "fewer_questions"]);
+  assert.deepEqual(Object.keys(ADJUSTMENTS), ["regenerate", "easier", "harder", "shorter", "more_practice"]);
 });
 
 test("generation prompt includes student card context and topic", async () => {

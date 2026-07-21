@@ -1,5 +1,6 @@
 const { blockedMessage } = require("./rate-limiter");
 const { toMoscowDateString } = require("../time");
+const { MIN_TARGET_QUESTION_COUNT, MAX_TARGET_QUESTION_COUNT } = require("../generator");
 
 const MIN_TRANSCRIPT_LENGTH = 20;
 
@@ -199,6 +200,50 @@ function createMessageHandler({ bot, database, generator, sessions, aiGuard, adm
           return bot.sendMessage(message.chat.id, error.code === "AI_NOT_CONFIGURED"
             ? AI_UNAVAILABLE_TEXT
             : "Не удалось внести правку. Попробуйте ещё раз.");
+        }
+      }
+
+      if (session.action === "generationQuestionCount") {
+        const tutor = await database.getTutorByTelegramId(message.from.id);
+        if (!tutor) return bot.sendMessage(message.chat.id, "Авторизация не найдена. Выполните /start.");
+        const generation = await database.getGeneration(session.generationId, tutor.id);
+        if (!generation) {
+          await sessions.delete(message.from.id);
+          return bot.sendMessage(message.chat.id, "Генерация не найдена.");
+        }
+        const count = Number(message.text.trim());
+        if (!Number.isInteger(count) || count < MIN_TARGET_QUESTION_COUNT || count > MAX_TARGET_QUESTION_COUNT) {
+          return bot.sendMessage(message.chat.id, `Укажите целое число от ${MIN_TARGET_QUESTION_COUNT} до ${MAX_TARGET_QUESTION_COUNT}.`);
+        }
+        const student = await database.getStudent(generation.studentId, tutor.id);
+        if (!student) {
+          await sessions.delete(message.from.id);
+          return bot.sendMessage(message.chat.id, "Ученик не найден.");
+        }
+        const instruction = `Сделай тест ровно из ${count} вопросов, сохранив тему, уровень и структуру.`;
+        try {
+          const outcome = await aiGuard.run(message.from.id, async () => {
+            await sessions.delete(message.from.id);
+            const card = await database.getCard(generation.studentId);
+            await bot.sendMessage(message.chat.id, `Генерирую тест на ${count} вопросов. Это может занять до минуты.`);
+            const { result } = await generator.generate({
+              type: generation.type, student, card, topic: generation.topic,
+              previousResult: generation.result, customInstruction: instruction,
+            });
+            const next = await database.createGeneration({
+              type: generation.type, studentId: generation.studentId, tutorId: tutor.id,
+              topic: generation.topic, inputParams: { questionCount: count }, result, parentId: generation.id,
+            });
+            await database.logUsageEvent({ eventType: "generation_adjustment", tutorId: tutor.id, meta: { type: generation.type, adjustment: "question_count" } });
+            return next;
+          });
+          if (outcome.blocked) return await bot.sendMessage(message.chat.id, blockedMessage(outcome.blocked));
+          return await sendGeneration(message.chat.id, outcome.value);
+        } catch (error) {
+          console.error("Generation question count change failed", error);
+          return bot.sendMessage(message.chat.id, error.code === "AI_NOT_CONFIGURED"
+            ? AI_UNAVAILABLE_TEXT
+            : "Не удалось изменить число вопросов. Попробуйте ещё раз.");
         }
       }
 
