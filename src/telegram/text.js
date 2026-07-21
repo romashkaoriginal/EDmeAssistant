@@ -8,8 +8,43 @@ function escapeHtml(value) {
   })[character]);
 }
 
+const UNSUPPORTED_LATEX_ENVIRONMENT_NAMES = "array|cases|aligned|align\\*?|matrix|pmatrix|bmatrix|vmatrix|Vmatrix";
+const UNSUPPORTED_LATEX_ENVIRONMENT_PATTERN = new RegExp(
+  String.raw`\\begin\{(${UNSUPPORTED_LATEX_ENVIRONMENT_NAMES})\}(\{[^{}]*\})?([\s\S]*?)\\end\{\1\}`,
+  "g",
+);
+
+function normalizeUnsupportedLatex(segment) {
+  return String(segment ?? "")
+    .replace(UNSUPPORTED_LATEX_ENVIRONMENT_PATTERN, (_, _environment, _columnSpec, body) => {
+      const rows = String(body)
+        .split(/\\\\(?:\[[^\]]*\])?/)
+        .map((row) => {
+          const notes = [];
+          const formula = row
+            .replace(/\\text\{([^{}]*)\}/g, (_, text) => {
+              const note = String(text).trim();
+              if (note) notes.push(note);
+              return "";
+            })
+            .replace(/&/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+          if (!formula) return notes.length ? `- ${notes.join(" ")}` : "";
+          return `- $${formula}$${notes.length ? ` — ${notes.join(" ")}` : ""}`;
+        })
+        .filter(Boolean);
+      return rows.join("\n");
+    })
+    .replace(/\${1,2}\s*\\left\s*(?:\\\{|\{)\s*(?=-\s*\$)/g, "")
+    .replace(/\\right(?:\\[}\]])?\.?\s*\${1,2}/g, "")
+    // Telegram's math renderer does not reliably support \text. Unicode text
+    // inside a formula is understood, whereas the raw command leaks to users.
+    .replace(/\\text\{([^{}]*)\}/g, "$1");
+}
+
 function normalizeMathDelimiters(segment) {
-  return segment
+  return normalizeUnsupportedLatex(segment)
     .replace(/\$\$\s*([\s\S]*?)\s*\$\$/g, (_, formula) => `$$${String(formula).trim()}$$`)
     .replace(/(^|[^\$])\$\s*([^\n$]+?)\s*\$(?!\$)/g, (_, prefix, formula) => `${prefix}$${String(formula).trim()}$`)
     .replace(/\\\(\s*([\s\S]*?)\s*\\\)/g, (_, formula) => `\\(${String(formula).trim()}\\)`)

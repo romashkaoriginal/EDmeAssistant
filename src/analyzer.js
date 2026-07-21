@@ -3,6 +3,7 @@ const { z } = require("zod");
 const { toMoscowDateString } = require("./time");
 
 const MODEL_PRICING_USD_PER_MILLION_TOKENS = {
+  "deepseek/deepseek-v4-pro": { input: 0.435, output: 0.87 },
   "qwen/qwen3-32b": { input: 0.08, output: 0.28 },
   "google/gemini-2.5-flash": { input: 0.30, output: 2.50 },
 };
@@ -149,7 +150,7 @@ class LessonAnalyzer {
   constructor({ apiKey, model, provider = "openai" }) {
     this.provider = provider;
     this.client = apiKey ? new OpenAI({ apiKey, ...(provider === "openrouter" && { baseURL: "https://openrouter.ai/api/v1" }) }) : null;
-    this.model = model || (provider === "openrouter" ? "qwen/qwen3-32b" : "gpt-5-mini");
+    this.model = model || (provider === "openrouter" ? "deepseek/deepseek-v4-pro" : "gpt-5-mini");
   }
 
   isConfigured() { return Boolean(this.client); }

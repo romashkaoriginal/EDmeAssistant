@@ -244,6 +244,15 @@ test("validation rejects an unmatched LaTeX dollar delimiter", () => {
   assert.ok(issues.includes("нарушена парность LaTeX-разделителей $ или $$"));
 });
 
+test("validation rejects unsupported Telegram LaTeX environments", () => {
+  const invalid = String.raw`# Материал
+
+$\begin{array}{l}x > 0\\x < 5\end{array}$`;
+  const issues = require("../src/generator").richMarkdownIssues({ text: invalid, type: "homework", student, topic: "Неравенства" });
+
+  assert.ok(issues.includes("есть неподдерживаемая Telegram LaTeX-команда"));
+});
+
 test("generation retries once when a test answer fails mathematical validation", async () => {
   const invalid = validFractionTest().replace("B. $\\frac{10}{21}$", "B. $\\frac{2}{3}$");
   const { generator, requests } = mockedGenerator([invalid, validFractionTest()]);
@@ -289,6 +298,46 @@ test("every test receives a mandatory second pass from the verifier model", asyn
   assert.match(requests[1].messages.at(-1).content, /орфографию, пунктуацию, грамматику и согласование слов/);
 });
 
+test("homework and task sets receive a mandatory second pass from the verifier model", async () => {
+  const material = "# Материал\n\n$2 + 2 = 4$";
+  for (const type of ["homework", "tasks"]) {
+    const { generator, requests } = mockedGenerator([material, material]);
+    generator.verifierModel = "deepseek/deepseek-v4-pro";
+
+    await generator.generate({ type, student, card, topic: "Дроби" });
+
+    assert.equal(requests.length, 2);
+    assert.equal(requests[1].model, "deepseek/deepseek-v4-pro");
+    assert.match(requests[1].messages.at(-1).content, /независимую строгую проверку предыдущего учебного материала/);
+    assert.match(requests[1].messages.at(-1).content, /отдельно найди ОДЗ/);
+  }
+});
+
+test("DeepSeek uses high reasoning for generation and xhigh reasoning for the audit", async () => {
+  const material = "# Материал\n\n$2 + 2 = 4$";
+  const { generator, requests } = mockedGenerator([material, material]);
+  generator.model = "deepseek/deepseek-v4-pro";
+  generator.verifierModel = "deepseek/deepseek-v4-pro";
+
+  await generator.generate({ type: "homework", student, card, topic: "Дроби" });
+
+  assert.deepEqual(requests[0].reasoning, { effort: "high" });
+  assert.deepEqual(requests[1].reasoning, { effort: "xhigh" });
+  assert.equal(requests[0].max_tokens, 6000);
+  assert.equal(requests[1].max_tokens, 6000);
+});
+
+test("solutions receive the verifier pass", async () => {
+  const { generator, requests } = mockedGenerator(["# Решения\n\n$2 + 2 = 4$", "# Решения\n\n$2 + 2 = 4$"]);
+  generator.verifierModel = "deepseek/deepseek-v4-pro";
+
+  await generator.solutions({ student, topic: "Дроби", previousResult: "# Задания\n\n$2 + 2$" });
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].model, "deepseek/deepseek-v4-pro");
+  assert.match(requests[1].messages.at(-1).content, /независимую строгую проверку предыдущего учебного материала/);
+});
+
 test("unknown type and adjustment are rejected", async () => {
   const { generator } = mockedGenerator("x");
   await assert.rejects(() => generator.generate({ type: "essay", student, card, topic: "Тема" }), /Unknown generation type/);
@@ -322,6 +371,7 @@ test("freeform answers with a methodist system prompt", async () => {
   assert.match(request.messages[0].content, /методист/);
   assert.match(request.messages[0].content, /между \$\.\.\.\$/);
   assert.equal(request.messages[1].content, "Как объяснить дроби пятикласснику?");
+  assert.equal(requests.length, 1);
 });
 
 test("freeform preserves Markdown math wrappers and normalizes LaTeX", async () => {

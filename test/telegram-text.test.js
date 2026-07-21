@@ -36,6 +36,20 @@ test("normalizeRichMarkdown leaves inline code untouched", () => {
   assert.equal(normalizeRichMarkdown(markdown), String.raw`Формула \`$ x^2 $\` как пример и обычная $y = x + 1$`);
 });
 
+test("normalizeRichMarkdown turns unsupported LaTeX arrays into Telegram-safe list items", () => {
+  const markdown = String.raw`Решение:
+
+$\left\{\begin{array}{l} h(x) > 1 \vee f(x) < g(x) \text{(если знак)} \\ h(x) < 1 \vee g(x) > 0 \text{(строгий)} \end{array}\right.$`;
+
+  assert.equal(
+    normalizeRichMarkdown(markdown),
+    String.raw`Решение:
+
+- $h(x) > 1 \vee f(x) < g(x)$ — (если знак)
+- $h(x) < 1 \vee g(x) > 0$ — (строгий)`,
+  );
+});
+
 test("sendRichMarkdown sends normalized LaTeX through Telegram rich messages and keeps the keyboard", async () => {
   const calls = [];
   const bot = {
