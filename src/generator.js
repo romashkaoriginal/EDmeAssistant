@@ -383,6 +383,7 @@ function parseAuditResult(text) {
   } catch {
     const error = new Error("AI verifier returned an invalid audit contract");
     error.code = "AI_AUDIT_FORMAT_INVALID";
+    error.auditDiagnostic = auditContractDiagnostic(text, "invalid_json");
     throw error;
   }
 
@@ -396,9 +397,22 @@ function parseAuditResult(text) {
     || (verdict === "pass" && issues.length)) {
     const error = new Error("AI verifier returned an incomplete audit contract");
     error.code = "AI_AUDIT_FORMAT_INVALID";
+    error.auditDiagnostic = auditContractDiagnostic(text, "invalid_shape");
     throw error;
   }
   return { verdict, issues: issues.map((issue) => issue.trim()).filter(Boolean), material: material.trim() };
+}
+
+function auditContractDiagnostic(text, reason) {
+  const source = String(text ?? "").trim();
+  return {
+    reason,
+    contentLength: source.length,
+    startsWithObject: source.startsWith("{"),
+    hasVerdictField: /"verdict"\s*:/u.test(source),
+    hasIssuesField: /"issues"\s*:/u.test(source),
+    hasMaterialField: /"material"\s*:/u.test(source),
+  };
 }
 
 function testQualityIssues(text, { targetQuestionCount = null } = {}) {
@@ -696,8 +710,34 @@ class ContentGenerator {
   }
 
   async audit(messages, options) {
-    const response = await this.complete(messages, { ...options, responseFormat: AUDIT_JSON_SCHEMA });
-    return parseAuditResult(response);
+    const requestOptions = { ...options, responseFormat: AUDIT_JSON_SCHEMA };
+    const response = await this.complete(messages, requestOptions);
+    try {
+      return parseAuditResult(response);
+    } catch (error) {
+      if (error.code !== "AI_AUDIT_FORMAT_INVALID") throw error;
+      console.warn("AI verifier returned invalid audit contract; retrying once", {
+        model: options?.model || this.verifierModel,
+        diagnostic: error.auditDiagnostic,
+      });
+      try {
+        const retryResponse = await this.complete([
+          ...messages,
+          { role: "assistant", content: response },
+          {
+            role: "user",
+            content: `Предыдущий ответ не соответствует обязательному JSON-контракту. Исправь только формат, не меняя смысл проверки. Верни один JSON-объект строго по этой схеме:\n${JSON.stringify(AUDIT_JSON_SCHEMA.schema)}`,
+          },
+        ], requestOptions);
+        return parseAuditResult(retryResponse);
+      } catch (retryError) {
+        if (retryError.code === "AI_AUDIT_FORMAT_INVALID") {
+          retryError.auditAttempts = 2;
+          retryError.initialAuditDiagnostic = error.auditDiagnostic;
+        }
+        throw retryError;
+      }
+    }
   }
 
   async generate({ type, student, card, topic, adjustment = null, previousResult = null, customInstruction = null, onProgress = null }) {
@@ -747,6 +787,8 @@ class ContentGenerator {
             model: error.aiModel || this.verifierModel,
             message: error.message,
             initialIssues,
+            auditDiagnostic: error.auditDiagnostic,
+            initialAuditDiagnostic: error.initialAuditDiagnostic,
           });
           result = fallback;
           issues = validate(result);
@@ -816,6 +858,8 @@ class ContentGenerator {
         code: error.code,
         model: error.aiModel || this.verifierModel,
         message: error.message,
+        auditDiagnostic: error.auditDiagnostic,
+        initialAuditDiagnostic: error.initialAuditDiagnostic,
       });
       return { result: normalizeOptionLineBreaks(draft) };
     }
@@ -853,6 +897,8 @@ class ContentGenerator {
         code: error.code,
         model: error.aiModel || this.verifierModel,
         message: error.message,
+        auditDiagnostic: error.auditDiagnostic,
+        initialAuditDiagnostic: error.initialAuditDiagnostic,
       });
       return { result: normalizeOptionLineBreaks(normalizeFreeformLatex(draft)) };
     }

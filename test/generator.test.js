@@ -265,6 +265,21 @@ test("audit rewrite replaces the generated material with its complete corrected 
   assert.match(requests[1].messages.at(-1).content, /самостоятельно получи или обоснуй результат/);
 });
 
+test("audit retries once when the verifier returns an invalid JSON contract", async () => {
+  const draft = "# Материал\n\n$2 + 2 = 4$.";
+  const corrected = "# Материал\n\n$2 + 2 = 4$.";
+  const malformedAudit = '{"verdict":"pass"}';
+  const validAudit = JSON.stringify({ verdict: "pass", issues: [], material: corrected });
+  const { generator, requests } = mockedGenerator([draft, malformedAudit, validAudit]);
+
+  const { result } = await generator.generate({ type: "homework", student, card, topic: "Тема" });
+
+  assert.equal(result, corrected);
+  assert.equal(requests.length, 3);
+  assert.equal(requests[2].response_format.type, "json_schema");
+  assert.match(requests[2].messages.at(-1).content, /не соответствует обязательному JSON-контракту/);
+});
+
 test("option normalizer splits and latinizes Cyrillic answer labels", () => {
   assert.equal(
     normalizeOptionLineBreaks("1. Выберите. А. первый В. второй С. третий Д. четвёртый"),
