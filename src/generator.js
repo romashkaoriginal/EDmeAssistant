@@ -165,9 +165,11 @@ const HIGH_REASONING_MAX_OUTPUT_TOKENS = 8000;
 const XHIGH_REASONING_MAX_OUTPUT_TOKENS = 10000;
 const HIGH_REASONING_BUDGET_TOKENS = 4000;
 const XHIGH_REASONING_BUDGET_TOKENS = 6000;
+const GEMINI_FLASH_REASONING_BUDGET_TOKENS = 2048;
 const MAX_CUSTOM_INSTRUCTION_LENGTH = 500;
 const TEST_OPTION_LABELS = ["A", "B", "C", "D"];
 const DEEPSEEK_V4_PRO_MODEL = "deepseek/deepseek-v4-pro";
+const GEMINI_FLASH_MODEL = "google/gemini-2.5-flash";
 const TEST_GENERATION_INSTRUCTIONS = `Для каждого вопроса создай ровно четыре разных варианта ответа с латинскими метками A, B, C и D. Каждый вариант начинай с новой отдельной строки в формате «A. текст варианта»; никогда не размещай два варианта на одной строке и не используй метки А, Б, В, Г. Сначала полностью реши вопрос, затем проверь все четыре варианта и только после этого выбери ключ. В разделе ответов для репетитора укажи для каждого вопроса его номер, одну метку правильного варианта и объяснение, которое прямо доказывает выбранный вариант. До возврата теста проверь, что номер, буква ключа, текст варианта и объяснение совпадают; при малейшем расхождении перепиши вопрос. Не создавай вопросы вида «на каком рисунке», «что изображено на рисунке/графике» и любые другие вопросы, для ответа на которые нужен отсутствующий визуальный материал. Свойства графиков проверяй по заданной формуле, координатам или полному текстовому описанию. Верни только готовый тест без отчёта о проверке и исправлениях.`;
 const TEST_AUDIT_INSTRUCTIONS = `Проведи независимую строгую проверку предыдущего теста.
 - Реши каждый вопрос заново, не доверяя указанному ключу и пояснению.
@@ -576,7 +578,7 @@ class ContentGenerator {
   constructor({ apiKey, model, provider = "openai" }) {
     this.provider = provider;
     this.client = apiKey ? new OpenAI({ apiKey, ...(provider === "openrouter" && { baseURL: "https://openrouter.ai/api/v1" }) }) : null;
-    this.model = model || (provider === "openrouter" ? DEEPSEEK_V4_PRO_MODEL : "gpt-5-mini");
+    this.model = model || (provider === "openrouter" ? GEMINI_FLASH_MODEL : "gpt-5-mini");
   }
 
   isConfigured() { return Boolean(this.client); }
@@ -625,24 +627,38 @@ class ContentGenerator {
     return this.provider === "openrouter" && model === DEEPSEEK_V4_PRO_MODEL;
   }
 
+  isGeminiFlash(model) {
+    return this.provider === "openrouter" && model === GEMINI_FLASH_MODEL;
+  }
+
   async complete(messages, { model = this.model, reasoningEffort = null, timeoutMs = null } = {}) {
     let text;
     let responseDiagnostics;
     if (this.provider === "openrouter") {
-      const useReasoning = this.isDeepSeekV4Pro(model) && reasoningEffort;
+      const useDeepSeekReasoning = this.isDeepSeekV4Pro(model) && reasoningEffort;
+      const useGeminiFlashReasoning = this.isGeminiFlash(model) && reasoningEffort;
       const response = await this.client.chat.completions.create({
         model,
         messages,
-        max_tokens: useReasoning
+        max_tokens: useDeepSeekReasoning
           ? (reasoningEffort === "xhigh" ? XHIGH_REASONING_MAX_OUTPUT_TOKENS : HIGH_REASONING_MAX_OUTPUT_TOKENS)
           : MAX_OUTPUT_TOKENS,
         // Keep a fixed share for the final answer. DeepSeek otherwise spent
         // the entire completion budget on reasoning and returned no content.
-        ...(useReasoning && {
+        ...(useDeepSeekReasoning && {
           reasoning: {
             max_tokens: reasoningEffort === "xhigh"
               ? XHIGH_REASONING_BUDGET_TOKENS
               : HIGH_REASONING_BUDGET_TOKENS,
+            exclude: true,
+          },
+        }),
+        // Gemini Flash has thinking disabled by default through OpenRouter.
+        // A modest fixed budget keeps complex school tasks reliable while
+        // retaining the substantial price advantage over Gemini Pro.
+        ...(useGeminiFlashReasoning && {
+          reasoning: {
+            max_tokens: GEMINI_FLASH_REASONING_BUDGET_TOKENS,
             exclude: true,
           },
         }),

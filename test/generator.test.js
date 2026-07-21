@@ -48,6 +48,14 @@ test("each user action sends exactly one request without a client timeout", asyn
   }
 });
 
+test("Gemini Flash receives a bounded thinking budget in the same request", async () => {
+  const { generator, requests } = mockedGenerator("Brief answer.");
+  generator.model = "google/gemini-2.5-flash";
+  await generator.freeform({ question: "How should I explain this topic?" });
+  assert.equal(requests.length, 1);
+  assert.deepEqual(requests[0].reasoning, { max_tokens: 2048, exclude: true });
+});
+
 test("generation prompt includes the card, topic, adjustment and self-check", async () => {
   const { generator, requests } = mockedGenerator("# Material\n\nText.");
   await generator.generate({ type: "tasks", student, card, topic: "subordinate clauses", adjustment: "easier", previousResult: "old result" });
