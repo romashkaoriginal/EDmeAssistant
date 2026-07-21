@@ -112,6 +112,13 @@ test("generation prompt includes the card, topic, adjustment and self-check", as
   assert.match(request.messages[1].content, /subordinate clauses/);
 });
 
+test("test prompt forbids equivalent answer options", async () => {
+  const { generator, requests } = mockedGenerator(validStructuredTest());
+  await generator.generate({ type: "test", student, card, topic: "fractions" });
+  assert.match(requests[0].messages[0].content, /попарно неравносильными/);
+  assert.match(requests[0].messages[0].content, /2,5; 2\.5; 5\/2; 10\/4/);
+});
+
 test("local validators reject bad keys and unsupported formatting", () => {
   const invalidKey = validFractionTest().replace("B. $\\frac{10}{21}$", "B. $\\frac{2}{3}$");
   assert.match(testQualityIssues(invalidKey).join("; "), /ключ/);
