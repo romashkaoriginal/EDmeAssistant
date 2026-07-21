@@ -30,6 +30,7 @@ function validFractionTest() {
 test("generator exposes all generation types", () => {
   assert.deepEqual(Object.keys(GENERATION_TYPES), ["homework", "test", "tasks"]);
   assert.equal(typeof ADJUSTMENTS.easier, "string");
+  assert.equal(new ContentGenerator({ apiKey: "test-key", provider: "openrouter" }).model, "google/gemini-2.5-pro");
 });
 
 test("each user action sends exactly one request without a client timeout", async () => {
