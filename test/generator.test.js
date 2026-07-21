@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { ContentGenerator, GENERATION_TYPES, ADJUSTMENTS, studentVersion, ANSWERS_MARKER, testQualityIssues, normalizeFreeformLatex, normalizeTestOptionLineBreaks } = require("../src/generator");
+const { ContentGenerator, GENERATION_TYPES, ADJUSTMENTS, studentVersion, ANSWERS_MARKER, testQualityIssues, normalizeFreeformLatex, normalizeOptionLineBreaks, normalizeTestOptionLineBreaks } = require("../src/generator");
 
 const student = { full_name: "Иван Петров", subject: "Математика", grade: 8 };
 const card = {
@@ -225,6 +225,13 @@ ${ANSWERS_MARKER}
 1. B — $2 + 2 = 4$.`);
 });
 
+test("shared option normalizer handles parentheses for freeform answers", () => {
+  assert.equal(
+    normalizeOptionLineBreaks("1. Выберите. A) первый B) второй C) третий D) четвёртый"),
+    "1. Выберите.\nA) первый\nB) второй\nC) третий\nD) четвёртый",
+  );
+});
+
 test("validation rejects references to missing visuals", () => {
   const invalid = validFractionTest().replace("Calculate $\\frac{2}{3} \\cdot \\frac{5}{7}$.", "На каком рисунке изображён график функции?");
   const issues = require("../src/generator").richMarkdownIssues({ text: invalid, type: "test", student, topic: "Графики" });
@@ -330,8 +337,8 @@ test("DeepSeek uses high reasoning for homework generation and audit", async () 
 
   await generator.generate({ type: "homework", student, card, topic: "Дроби" });
 
-  assert.deepEqual(requests[0].reasoning, { effort: "high" });
-  assert.deepEqual(requests[1].reasoning, { effort: "high" });
+  assert.deepEqual(requests[0].reasoning, { max_tokens: 4000, exclude: true });
+  assert.deepEqual(requests[1].reasoning, { max_tokens: 4000, exclude: true });
   assert.equal(requests[0].max_tokens, 8000);
   assert.equal(requests[1].max_tokens, 8000);
 });
@@ -343,8 +350,8 @@ test("test audit uses xhigh reasoning", async () => {
 
   await generator.generate({ type: "test", student, card, topic: "Дроби" });
 
-  assert.deepEqual(requests[0].reasoning, { effort: "high" });
-  assert.deepEqual(requests[1].reasoning, { effort: "xhigh" });
+  assert.deepEqual(requests[0].reasoning, { max_tokens: 4000, exclude: true });
+  assert.deepEqual(requests[1].reasoning, { max_tokens: 6000, exclude: true });
   assert.equal(requests[1].max_tokens, 10000);
 });
 
@@ -477,6 +484,19 @@ $\frac{2}{5} \div \frac{4}{10} = 1$
 
 Допустимо, только если $c \neq 0$.`);
   assert.equal(normalizeFreeformLatex(String.raw`$$ \frac{3}{4} $$`), String.raw`$$\frac{3}{4}$$`);
+  assert.equal(
+    normalizeFreeformLatex(String.raw`$$\\\\frac{1}{3}\\\\qquad\\\\frac{2}{3}$$`),
+    String.raw`$$\frac{1}{3}\qquad\frac{2}{3}$$`,
+  );
+});
+
+test("freeform puts inline answer variants on separate lines", async () => {
+  const answer = "1. Выберите верный ответ. A) первый B) второй C) третий D) четвёртый";
+  const { generator } = mockedGenerator(answer);
+
+  const { result } = await generator.freeform({ question: "Составь короткий тест" });
+
+  assert.equal(result, "1. Выберите верный ответ.\nA) первый\nB) второй\nC) третий\nD) четвёртый");
 });
 
 test("freeform returns the first pass when its verifier is empty", async () => {
