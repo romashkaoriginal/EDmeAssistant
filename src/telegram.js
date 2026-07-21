@@ -235,7 +235,10 @@ async function sendRichMarkdown(bot, chatId, text, options = undefined) {
   // labels can otherwise reach the client as one dense line.
   const normalizedOptions = String(text ?? "").replace(/([^\n])(?:[ \t]+)([A-DАВСД])([.)])\s+(?=\S)/g, (_, prefix, label, suffix) => {
     const latinLabel = { "А": "A", "В": "B", "С": "C", "Д": "D" }[label] || label;
-    return `${prefix}\n${latinLabel}${suffix} `;
+    // Telegram Rich Markdown can render one \n inside a paragraph as a space.
+    // Use a paragraph boundary at the final delivery boundary, including for
+    // old saved generations that bypass the generator normalizer.
+    return `${prefix}\n\n${latinLabel}${suffix} `;
   });
   const chunks = splitChunks(normalizeRichMarkdown(normalizedOptions));
   const sendChunk = async (chunk, chunkOptions) => {

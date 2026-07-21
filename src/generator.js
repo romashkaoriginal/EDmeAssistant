@@ -166,6 +166,8 @@ const XHIGH_REASONING_MAX_OUTPUT_TOKENS = 10000;
 const HIGH_REASONING_BUDGET_TOKENS = 4000;
 const XHIGH_REASONING_BUDGET_TOKENS = 6000;
 const GEMINI_FLASH_REASONING_BUDGET_TOKENS = 2048;
+const GEMINI_PRO_REASONING_BUDGET_TOKENS = 2048;
+const GEMINI_PRO_RETRY_REASONING_BUDGET_TOKENS = 1024;
 const MAX_CUSTOM_INSTRUCTION_LENGTH = 500;
 const TEST_OPTION_LABELS = ["A", "B", "C", "D"];
 const DEEPSEEK_V4_PRO_MODEL = "deepseek/deepseek-v4-pro";
@@ -354,7 +356,10 @@ function normalizeOptionLineBreaks(text) {
     // sets and keep every answer on its own line in every generation mode.
     .replace(/([^\n])(?:[ \t]+)([A-DАБВГ])([.)])\s+(?=\S)/g, (_, prefix, label, suffix) => {
       const latinLabel = { "А": "A", "Б": "B", "В": "C", "Г": "D" }[label] || label;
-      return `${prefix}\n${latinLabel}${suffix} `;
+      // A single line feed is a "soft" line break in Telegram Rich Markdown
+      // and may be rendered as a space. A blank line is a real paragraph
+      // boundary, so options cannot collapse back into one line on delivery.
+      return `${prefix}\n\n${latinLabel}${suffix} `;
     });
 }
 
@@ -632,12 +637,17 @@ class ContentGenerator {
     return this.provider === "openrouter" && model === GEMINI_FLASH_MODEL;
   }
 
+  isGeminiPro(model) {
+    return this.provider === "openrouter" && model === GEMINI_PRO_MODEL;
+  }
+
   async complete(messages, { model = this.model, reasoningEffort = null, timeoutMs = null } = {}) {
     let text;
     let responseDiagnostics;
     if (this.provider === "openrouter") {
       const useDeepSeekReasoning = this.isDeepSeekV4Pro(model) && reasoningEffort;
       const useGeminiFlashReasoning = this.isGeminiFlash(model) && reasoningEffort;
+      const useGeminiProReasoning = this.isGeminiPro(model) && reasoningEffort;
       const response = await this.client.chat.completions.create({
         model,
         messages,
@@ -660,6 +670,17 @@ class ContentGenerator {
         ...(useGeminiFlashReasoning && {
           reasoning: {
             max_tokens: GEMINI_FLASH_REASONING_BUDGET_TOKENS,
+            exclude: true,
+          },
+        }),
+        // Gemini 2.5 Pro otherwise chooses its thinking budget itself. On
+        // complex prompts it can spend the whole completion on hidden
+        // reasoning and return finish_reason=error with empty content.
+        ...(useGeminiProReasoning && {
+          reasoning: {
+            max_tokens: reasoningEffort === "low"
+              ? GEMINI_PRO_RETRY_REASONING_BUDGET_TOKENS
+              : GEMINI_PRO_REASONING_BUDGET_TOKENS,
             exclude: true,
           },
         }),
@@ -712,6 +733,22 @@ class ContentGenerator {
       throw error;
     }
     return text.trim();
+  }
+
+  async completeWithProviderRetry(messages, options = {}) {
+    try {
+      return await this.complete(messages, options);
+    } catch (error) {
+      const isEmptyProviderFailure = error.code === "AI_EMPTY_RESPONSE"
+        && error.aiResponse?.finishReason === "error";
+      if (!isEmptyProviderFailure) throw error;
+
+      console.warn("AI provider returned an empty error response; retrying once with a smaller reasoning budget", {
+        model: error.aiModel || options.model || this.model,
+        usage: error.aiResponse?.usage,
+      });
+      return this.complete(messages, { ...options, reasoningEffort: "low" });
+    }
   }
 
   /* Removed: former multi-call audit and rewrite implementation.
@@ -771,7 +808,7 @@ class ContentGenerator {
     const targetQuestionCount = type === "test" ? extractTargetQuestionCount(instruction) : null;
 
     const messages = this.buildMessages({ type, student, card, topic, adjustment, previousResult, customInstruction: instruction, targetQuestionCount });
-    let result = await this.complete(messages, { reasoningEffort: "high" });
+    let result = await this.completeWithProviderRetry(messages, { reasoningEffort: "high" });
     if (type === "test") result = normalizeTestOptionLineBreaks(result);
     const validate = (candidate) => [
       ...richMarkdownIssues({ text: candidate, type, student, topic }),
@@ -885,7 +922,7 @@ class ContentGenerator {
       { role: "assistant", content: previousResult },
       { role: "user", content: "Дай решения, ответы и подсказки к этим заданиям." },
     ];
-    const draft = await this.complete(messages, { reasoningEffort: "high" });
+    const draft = await this.completeWithProviderRetry(messages, { reasoningEffort: "high" });
     return { result: normalizeOptionLineBreaks(draft) };
     try {
       const audit = await this.audit([
@@ -928,7 +965,7 @@ class ContentGenerator {
       "Подбирай объём по запросу. Если запрошены задания, тест или ключ с объяснениями, выдай материал полностью; не обрывай его ради искусственного ограничения длины.",
     ].join(" ");
     const messages = [{ role: "system", content: instructions }, { role: "user", content: question }];
-    const draft = await this.complete(messages, { reasoningEffort: "high" });
+    const draft = await this.completeWithProviderRetry(messages, { reasoningEffort: "high" });
     return { result: normalizeOptionLineBreaks(normalizeFreeformLatex(draft)) };
     try {
       const audit = await this.audit([

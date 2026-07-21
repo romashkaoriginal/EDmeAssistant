@@ -67,6 +67,28 @@ test("Gemini Flash receives a bounded thinking budget in the same request", asyn
   assert.deepEqual(requests[0].reasoning, { max_tokens: 2048, exclude: true });
 });
 
+test("Gemini Pro reserves output space and retries only an empty provider error", async () => {
+  const generator = new ContentGenerator({ apiKey: "test-key", provider: "openrouter", model: "google/gemini-2.5-pro" });
+  const requests = [];
+  generator.client = { chat: { completions: { create: async (payload) => {
+    requests.push(payload);
+    if (requests.length === 1) {
+      return {
+        model: payload.model,
+        choices: [{ finish_reason: "error", message: { content: "", reasoning: "internal" } }],
+        usage: { prompt_tokens: 100, completion_tokens: 2000, total_tokens: 2100 },
+      };
+    }
+    return { model: payload.model, choices: [{ finish_reason: "stop", message: { content: "Brief answer." } }] };
+  } } } };
+
+  const { result } = await generator.freeform({ question: "Explain a school topic." });
+  assert.equal(result, "Brief answer.");
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[0].reasoning, { max_tokens: 2048, exclude: true });
+  assert.deepEqual(requests[1].reasoning, { max_tokens: 1024, exclude: true });
+});
+
 test("generation prompt includes the card, topic, adjustment and self-check", async () => {
   const { generator, requests } = mockedGenerator("# Material\n\nText.");
   await generator.generate({ type: "tasks", student, card, topic: "subordinate clauses", adjustment: "easier", previousResult: "old result" });
@@ -84,12 +106,12 @@ test("local validators reject bad keys and unsupported formatting", () => {
 });
 
 test("option normalizers put choices on separate lines", () => {
-  assert.equal(normalizeOptionLineBreaks("Question. A) one B) two C) three D) four"), "Question.\nA) one\nB) two\nC) three\nD) four");
+  assert.equal(normalizeOptionLineBreaks("Question. A) one B) two C) three D) four"), "Question.\n\nA) one\n\nB) two\n\nC) three\n\nD) four");
   assert.equal(
     normalizeOptionLineBreaks("Question. \u0410) one \u0411) two \u0412) three \u0413) four"),
-    "Question.\nA) one\nB) two\nC) three\nD) four",
+    "Question.\n\nA) one\n\nB) two\n\nC) three\n\nD) four",
   );
-  assert.match(normalizeTestOptionLineBreaks("1. Question\nA. One B. Two C. Three D. Four"), /A\. One\nB\. Two\nC\. Three\nD\. Four/);
+  assert.match(normalizeTestOptionLineBreaks("1. Question\nA. One B. Two C. Three D. Four"), /A\. One\n\nB\. Two\n\nC\. Three\n\nD\. Four/);
 });
 
 test("empty provider output has safe diagnostics", async () => {
