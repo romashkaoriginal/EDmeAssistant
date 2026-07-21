@@ -1,6 +1,6 @@
 const TelegramBot = require("node-telegram-bot-api").default;
 const { runLessonAnalysis, runProfileAnalysis } = require("./analysis-runner");
-const { GENERATION_TYPES, studentVersion } = require("./generator");
+const { ANSWERS_MARKER, GENERATION_TYPES, studentVersion } = require("./generator");
 const { createMessageHandler } = require("./telegram/message-handler");
 const { createCallbackHandler } = require("./telegram/callback-handler");
 const { createAdminHandler } = require("./telegram/admin-handler");
@@ -229,6 +229,23 @@ function splitChunks(text, size = MESSAGE_CHUNK_SIZE) {
   return chunks;
 }
 
+function formatOptionBlocks(text) {
+  const source = String(text ?? "");
+  const markerIndex = source.indexOf(ANSWERS_MARKER);
+  const questions = markerIndex === -1 ? source : source.slice(0, markerIndex);
+  const answers = markerIndex === -1 ? "" : source.slice(markerIndex);
+  const labelMap = { A: "A", B: "B", C: "C", D: "D", "\u0410": "A", "\u0411": "B", "\u0412": "C", "\u0413": "D" };
+
+  // Rich Messages can collapse ordinary line breaks. List items are actual
+  // Markdown blocks, so every answer option stays on its own visual line.
+  // Do not touch the answer key: "1. B — ..." is not an option row.
+  const formattedQuestions = questions.replace(
+    /(?:^|[ \t]*\n+[ \t]*|[ \t]+)([A-D\u0410-\u0413])([.)])\s+(?=\S)/gm,
+    (match, label, _suffix, offset) => `${offset === 0 ? "" : "\n"}- **${labelMap[label] || label}.** `,
+  );
+  return `${formattedQuestions}${answers}`;
+}
+
 async function sendRichMarkdown(bot, chatId, text, options = undefined) {
   // This is the final formatting boundary before Telegram. Do not rely only on
   // the generator: old saved results, regenerated text and Cyrillic А/В/С/Д
@@ -240,7 +257,8 @@ async function sendRichMarkdown(bot, chatId, text, options = undefined) {
     // old saved generations that bypass the generator normalizer.
     return `${prefix}\n\n${latinLabel}${suffix} `;
   });
-  const chunks = splitChunks(normalizeRichMarkdown(normalizedOptions));
+  const optionBlocks = formatOptionBlocks(normalizedOptions);
+  const chunks = splitChunks(normalizeRichMarkdown(optionBlocks));
   const sendChunk = async (chunk, chunkOptions) => {
     if (typeof bot.sendRichMessage !== "function") {
       return bot.sendMessage(chatId, richMarkdownToPlainText(chunk), chunkOptions);
@@ -621,4 +639,4 @@ function createBot({ token, database, analyzer, moyKlass, generator }) {
   return bot;
 }
 
-module.exports = { createBot, splitChunks, sendRichMarkdown, menuKeyboard };
+module.exports = { createBot, splitChunks, sendRichMarkdown, formatOptionBlocks, menuKeyboard };

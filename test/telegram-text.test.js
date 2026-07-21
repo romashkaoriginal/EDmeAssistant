@@ -23,11 +23,11 @@ test("sendRichMarkdown sends Rich Markdown and preserves the keyboard", async ()
   assert.deepEqual(calls, [[42, { markdown: "# Title" }, { reply_markup: keyboard }]]);
 });
 
-test("sendRichMarkdown uses paragraph breaks between inline options", async () => {
+test("sendRichMarkdown renders inline options as separate Markdown blocks", async () => {
   const calls = [];
   const bot = { sendRichMessage: async (...args) => calls.push(args) };
   await sendRichMarkdown(bot, 42, "1. Choose. A. one B. two C. three D. four");
-  assert.equal(calls[0][1].markdown, "1. Choose.\n\nA. one\n\nB. two\n\nC. three\n\nD. four");
+  assert.equal(calls[0][1].markdown, "1. Choose.\n- **A.** one\n- **B.** two\n- **C.** three\n- **D.** four");
 });
 
 test("sendRichMarkdown falls back to readable plain text when markup is rejected", async () => {
