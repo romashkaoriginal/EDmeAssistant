@@ -18,9 +18,9 @@ function mockedGenerator(reply) {
   generator.client = {
     chat: {
       completions: {
-        create: async (payload) => {
+        create: async (payload, options) => {
           const replyIndex = Math.min(requests.length, replies.length - 1);
-          requests.push(payload);
+          requests.push({ ...payload, requestOptions: options });
           return { choices: [{ message: { content: replies[replyIndex] } }] };
         },
       },
@@ -313,7 +313,7 @@ test("homework and task sets receive a mandatory second pass from the verifier m
   }
 });
 
-test("DeepSeek uses high reasoning for generation and xhigh reasoning for the audit", async () => {
+test("DeepSeek uses high reasoning for homework generation and audit", async () => {
   const material = "# Материал\n\n$2 + 2 = 4$";
   const { generator, requests } = mockedGenerator([material, material]);
   generator.model = "deepseek/deepseek-v4-pro";
@@ -322,9 +322,31 @@ test("DeepSeek uses high reasoning for generation and xhigh reasoning for the au
   await generator.generate({ type: "homework", student, card, topic: "Дроби" });
 
   assert.deepEqual(requests[0].reasoning, { effort: "high" });
+  assert.deepEqual(requests[1].reasoning, { effort: "high" });
+  assert.equal(requests[0].max_tokens, 4000);
+  assert.equal(requests[1].max_tokens, 4000);
+});
+
+test("test audit uses xhigh reasoning", async () => {
+  const { generator, requests } = mockedGenerator([validFractionTest(), validFractionTest()]);
+  generator.model = "deepseek/deepseek-v4-pro";
+  generator.verifierModel = "deepseek/deepseek-v4-pro";
+
+  await generator.generate({ type: "test", student, card, topic: "Дроби" });
+
+  assert.deepEqual(requests[0].reasoning, { effort: "high" });
   assert.deepEqual(requests[1].reasoning, { effort: "xhigh" });
-  assert.equal(requests[0].max_tokens, 6000);
   assert.equal(requests[1].max_tokens, 6000);
+});
+
+test("a valid first pass is returned when the verifier responds with an empty body", async () => {
+  const material = "# Материал\n\n$2 + 2 = 4$";
+  const { generator, requests } = mockedGenerator([material, ""]);
+
+  const { result } = await generator.generate({ type: "homework", student, card, topic: "Дроби" });
+
+  assert.equal(result, material);
+  assert.equal(requests.length, 2);
 });
 
 test("solutions receive the verifier pass", async () => {
@@ -335,6 +357,7 @@ test("solutions receive the verifier pass", async () => {
 
   assert.equal(requests.length, 2);
   assert.equal(requests[1].model, "deepseek/deepseek-v4-pro");
+  assert.equal(requests[1].requestOptions.timeout, 60_000);
   assert.match(requests[1].messages.at(-1).content, /независимую строгую проверку предыдущего учебного материала/);
 });
 

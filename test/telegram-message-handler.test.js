@@ -1,6 +1,12 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createMessageHandler } = require("../src/telegram/message-handler");
+const { createMessageHandler, generationErrorText } = require("../src/telegram/message-handler");
+
+test("generation failures are explained without exposing provider internals", () => {
+  assert.match(generationErrorText({ code: "AI_EMPTY_RESPONSE" }), /не вернул материал/);
+  assert.match(generationErrorText({ code: "AI_GENERATION_VALIDATION_FAILED" }), /неподдерживаемом формате/);
+  assert.match(generationErrorText({ status: 429 }), /перегружен/);
+});
 
 test("login scenario uses the shared contact's phone number and clears the persisted session", async () => {
   const calls = [];

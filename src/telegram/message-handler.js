@@ -4,6 +4,15 @@ const { MIN_TARGET_QUESTION_COUNT, MAX_TARGET_QUESTION_COUNT } = require("../gen
 
 const MIN_TRANSCRIPT_LENGTH = 20;
 
+function generationErrorText(error, fallback = "Не удалось сгенерировать. Попробуйте ещё раз.") {
+  if (error.code === "AI_NOT_CONFIGURED") return "ИИ недоступен: настройте ключ ИИ на сервере.";
+  if (error.code === "AI_EMPTY_RESPONSE") return "ИИ не вернул материал. Попробуйте ещё раз или сузьте тему.";
+  if (error.code === "AI_GENERATION_VALIDATION_FAILED") return "ИИ вернул материал в неподдерживаемом формате. Уточните тему и попробуйте ещё раз.";
+  if (error.status === 429) return "ИИ-провайдер перегружен. Подождите минуту и попробуйте ещё раз.";
+  if (error.status >= 500) return "ИИ-провайдер временно недоступен. Попробуйте ещё раз через несколько минут.";
+  return fallback;
+}
+
 function createMessageHandler({ bot, database, generator, sessions, aiGuard, adminHandler, handleFreeform, menu, refreshStudents, sendGeneration, sendDraft, sendProfileDraft, sendStudentCard, editCardKeyboard, CARD_FIELDS, DRAFT_FIELDS, PROFILE_DRAFT_FIELDS, cardFieldValueText, materialsText }) {
   const AI_UNAVAILABLE_TEXT = "ИИ недоступен: настройте ключ ИИ на сервере.";
 
@@ -145,8 +154,13 @@ function createMessageHandler({ bot, database, generator, sessions, aiGuard, adm
             await sessions.delete(message.from.id);
             const card = await database.getCard(session.studentId);
             const label = session.type === "homework" ? "домашнее задание" : session.type === "test" ? "тест" : "задачи";
-            await bot.sendMessage(message.chat.id, `Генерирую ${label}. Тема: ${topic}. Обычно это занимает меньше минуты.`);
-            const { result } = await generator.generate({ type: session.type, student, card, topic });
+            await bot.sendMessage(message.chat.id, `Генерирую ${label}. Тема: ${topic}. Сначала подготовлю материал, затем перепроверю его — это может занять до двух минут.`);
+            const { result } = await generator.generate({
+              type: session.type, student, card, topic,
+              onProgress: async ({ stage }) => {
+                if (stage === "auditing") await bot.sendMessage(message.chat.id, "Черновик готов. Перепроверяю факты, математику и форматирование…").catch(() => {});
+              },
+            });
             const generation = await database.createGeneration({
               type: session.type, studentId: student.id, tutorId: tutor.id, topic, result,
             });
@@ -157,9 +171,7 @@ function createMessageHandler({ bot, database, generator, sessions, aiGuard, adm
           return await sendGeneration(message.chat.id, outcome.value);
         } catch (error) {
           console.error("Generation failed", error);
-          return bot.sendMessage(message.chat.id, error.code === "AI_NOT_CONFIGURED"
-            ? AI_UNAVAILABLE_TEXT
-            : "Не удалось сгенерировать. Попробуйте ещё раз.");
+          return bot.sendMessage(message.chat.id, generationErrorText(error));
         }
       }
 
@@ -266,4 +278,4 @@ function createMessageHandler({ bot, database, generator, sessions, aiGuard, adm
   };
 }
 
-module.exports = { createMessageHandler };
+module.exports = { createMessageHandler, generationErrorText };

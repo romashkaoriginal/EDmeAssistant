@@ -142,7 +142,9 @@ function extractTargetQuestionCount(instruction) {
 }
 
 const MAX_OUTPUT_TOKENS = 2500;
-const REASONING_MAX_OUTPUT_TOKENS = 6000;
+const HIGH_REASONING_MAX_OUTPUT_TOKENS = 4000;
+const XHIGH_REASONING_MAX_OUTPUT_TOKENS = 6000;
+const AUDIT_TIMEOUT_MS = 60_000;
 const MAX_CUSTOM_INSTRUCTION_LENGTH = 500;
 const MAX_GENERATION_ATTEMPTS = 2;
 const TEST_OPTION_LABELS = ["A", "B", "C", "D"];
@@ -523,16 +525,18 @@ class ContentGenerator {
     return this.provider === "openrouter" && model === DEEPSEEK_V4_PRO_MODEL;
   }
 
-  async complete(messages, { model = this.model, reasoningEffort = null } = {}) {
+  async complete(messages, { model = this.model, reasoningEffort = null, timeoutMs = null } = {}) {
     let text;
     if (this.provider === "openrouter") {
       const useReasoning = this.isDeepSeekV4Pro(model) && reasoningEffort;
       const response = await this.client.chat.completions.create({
         model,
         messages,
-        max_tokens: useReasoning ? REASONING_MAX_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS,
+        max_tokens: useReasoning
+          ? (reasoningEffort === "xhigh" ? XHIGH_REASONING_MAX_OUTPUT_TOKENS : HIGH_REASONING_MAX_OUTPUT_TOKENS)
+          : MAX_OUTPUT_TOKENS,
         ...(useReasoning && { reasoning: { effort: reasoningEffort } }),
-      });
+      }, timeoutMs ? { timeout: timeoutMs } : undefined);
       text = response.choices[0]?.message?.content;
     } else {
       const response = await this.client.responses.create({
@@ -544,11 +548,17 @@ class ContentGenerator {
       });
       text = response.output_text;
     }
-    if (!text || !text.trim()) throw new Error("AI returned an empty generation");
+    if (!text || !text.trim()) {
+      const error = new Error("AI returned an empty generation");
+      error.code = "AI_EMPTY_RESPONSE";
+      error.aiModel = model;
+      error.reasoningEffort = reasoningEffort;
+      throw error;
+    }
     return text.trim();
   }
 
-  async generate({ type, student, card, topic, adjustment = null, previousResult = null, customInstruction = null }) {
+  async generate({ type, student, card, topic, adjustment = null, previousResult = null, customInstruction = null, onProgress = null }) {
     if (!this.client) {
       const error = new Error("AI provider is not configured");
       error.code = "AI_NOT_CONFIGURED";
@@ -567,18 +577,40 @@ class ContentGenerator {
       ...(type === "test" ? testQualityIssues(candidate, { targetQuestionCount }) : []),
     ];
     let issues = validate(result);
+    const initialResult = result;
+    const initialIssues = issues;
     const needsSecondPass = true;
     if (needsSecondPass && MAX_GENERATION_ATTEMPTS > 1) {
       const correction = type === "test"
         ? `${TEST_AUDIT_INSTRUCTIONS}${targetQuestionCount ? `\nВ тесте должно остаться ровно ${targetQuestionCount} вопросов.` : ""}${issues.length ? `\nАвтоматическая проверка также обнаружила: ${issues.join("; ")}.` : ""}`
         : `${MATERIAL_AUDIT_INSTRUCTIONS}${issues.length ? `\nАвтоматическая проверка также обнаружила: ${issues.join("; ")}.` : ""}`;
-      result = await this.complete([
-        ...messages,
-        { role: "assistant", content: result },
-        { role: "user", content: correction },
-      ], { model: this.verifierModel, reasoningEffort: "xhigh" });
-      if (type === "test") result = normalizeTestOptionLineBreaks(result);
-      issues = validate(result);
+      if (onProgress) await onProgress({ stage: "auditing" });
+      try {
+        result = await this.complete([
+          ...messages,
+          { role: "assistant", content: result },
+          { role: "user", content: correction },
+        ], { model: this.verifierModel, reasoningEffort: type === "test" ? "xhigh" : "high", timeoutMs: AUDIT_TIMEOUT_MS });
+        if (type === "test") result = normalizeTestOptionLineBreaks(result);
+        issues = validate(result);
+      } catch (error) {
+        if (!initialIssues.length) {
+          console.warn("AI verifier failed; returning the valid first-pass material", {
+            code: error.code,
+            model: error.aiModel || this.verifierModel,
+            message: error.message,
+          });
+          result = initialResult;
+          issues = initialIssues;
+        } else {
+          throw error;
+        }
+      }
+      if (issues.length && !initialIssues.length) {
+        console.warn("AI verifier produced invalid material; returning the valid first-pass material", { issues });
+        result = initialResult;
+        issues = initialIssues;
+      }
     }
     if (issues.length) {
       const error = new Error(`AI generation validation failed after ${MAX_GENERATION_ATTEMPTS} attempts: ${issues.join("; ")}`);
@@ -610,12 +642,21 @@ class ContentGenerator {
       { role: "user", content: "Дай решения, ответы и подсказки к этим заданиям." },
     ];
     const draft = await this.complete(messages, { reasoningEffort: "high" });
-    const result = await this.complete([
-      ...messages,
-      { role: "assistant", content: draft },
-      { role: "user", content: MATERIAL_AUDIT_INSTRUCTIONS },
-    ], { model: this.verifierModel, reasoningEffort: "xhigh" });
-    return { result };
+    try {
+      const result = await this.complete([
+        ...messages,
+        { role: "assistant", content: draft },
+        { role: "user", content: MATERIAL_AUDIT_INSTRUCTIONS },
+      ], { model: this.verifierModel, reasoningEffort: "high", timeoutMs: AUDIT_TIMEOUT_MS });
+      return { result };
+    } catch (error) {
+      console.warn("AI verifier failed for solutions; returning the first-pass material", {
+        code: error.code,
+        model: error.aiModel || this.verifierModel,
+        message: error.message,
+      });
+      return { result: draft };
+    }
   }
 
   async freeform({ question }) {
